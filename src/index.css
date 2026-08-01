@@ -1,0 +1,657 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+/* ==========================================================================
+   1. Design tokens — ui_mastercontext.md Section 2.2
+   ========================================================================== */
+
+:root {
+  /* Base */
+  --bg-base: #e8ecf1;
+  --bg-sidebar: #dee3ea;
+  --bg-header: #e8ecf1;
+
+  /* Shadows (neumorphic) */
+  --shadow-light: #ffffff;
+  --shadow-dark: #c5cad3;
+
+  /* Accent */
+  --color-primary: #5b8a9a;
+  --color-primary-hover: #4a7585;
+  --color-primary-light: rgba(91, 138, 154, 0.12);
+  --color-success: #6ab07b;
+  --color-warning: #d4a056;
+  --color-danger: #c75c5c;
+  --color-info: #7b9acc;
+
+  /* Text */
+  --text-primary: #2d3436;
+  --text-secondary: #636e72;
+  --text-muted: #9ba3a9;
+  --text-on-accent: #ffffff;
+
+  /* Glass (login page + modals) */
+  --glass-bg: rgba(255, 255, 255, 0.25);
+  --glass-border: 1px solid rgba(255, 255, 255, 0.35);
+  --glass-blur: blur(16px);
+
+  /* Misc */
+  --radius-card: 20px;
+  --radius-input: 12px;
+  --radius-button: 12px;
+  --radius-badge: 8px;
+  --transition-default: all 0.2s ease;
+
+  /* Spacing scale — Section 2.5 */
+  --space-4: 4px;
+  --space-8: 8px;
+  --space-12: 12px;
+  --space-16: 16px;
+  --space-20: 20px;
+  --space-24: 24px;
+  --space-32: 32px;
+  --space-40: 40px;
+  --space-48: 48px;
+  --space-64: 64px;
+
+  --card-padding: var(--space-24);
+  --section-gap: var(--space-24);
+  --grid-gap: var(--space-20);
+  --sidebar-item-padding: var(--space-12) var(--space-16);
+
+  /* Layout — Section 3 */
+  --sidebar-width: 240px;
+  --header-height: 60px;
+  --content-padding: var(--space-32);
+}
+
+/* ==========================================================================
+   2. Reset
+   ========================================================================== */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: 'Manrope', sans-serif;
+  font-size: 14px;
+  color: var(--text-primary);
+  line-height: 1.5;
+  background: var(--bg-base);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ==========================================================================
+   3. Typography — Section 2.4
+   ========================================================================== */
+
+h1,
+h2,
+h3,
+h4,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: 28px;
+  font-weight: 700;
+}
+
+h2 {
+  font-size: 22px;
+  font-weight: 600;
+}
+
+h3 {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+/* Data/technical labels: donor IDs, recipient IDs, organ IDs, match scores,
+   CPRA percentages, blood groups, HLA codes, timestamps */
+.mono {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  color: var(--color-primary);
+  letter-spacing: 0.5px;
+}
+
+/* ==========================================================================
+   4. Neumorphic shadow mixins — Section 2.3
+   ========================================================================== */
+
+.neu-raised {
+  background: var(--bg-base);
+  box-shadow:
+    8px 8px 16px var(--shadow-dark),
+    -8px -8px 16px var(--shadow-light);
+  border-radius: var(--radius-card);
+}
+
+.neu-inset {
+  background: var(--bg-base);
+  box-shadow:
+    inset 4px 4px 8px var(--shadow-dark),
+    inset -4px -4px 8px var(--shadow-light);
+  border-radius: var(--radius-input);
+}
+
+.neu-raised-sm {
+  box-shadow:
+    4px 4px 8px var(--shadow-dark),
+    -4px -4px 8px var(--shadow-light);
+  border-radius: var(--radius-input);
+}
+
+/* Button press effect — raised to inset, 100ms (Section 9) */
+.neu-button {
+  transition: box-shadow 100ms ease;
+}
+
+.neu-button:active {
+  box-shadow:
+    inset 3px 3px 6px var(--shadow-dark),
+    inset -3px -3px 6px var(--shadow-light);
+}
+
+/* Card lift on hover — 200ms (Section 9) */
+.neu-hover-lift {
+  transition:
+    transform 200ms ease,
+    box-shadow 200ms ease;
+}
+
+.neu-hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    10px 10px 20px var(--shadow-dark),
+    -10px -10px 20px var(--shadow-light);
+}
+
+/* Glass surface — login page + modals (Section 2.2) */
+.glass {
+  background: var(--glass-bg);
+  border: var(--glass-border);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+}
+
+/* ==========================================================================
+   5. Status badges — Section 4.3
+   ========================================================================== */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  border-radius: var(--radius-badge);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badge-active {
+  background: rgba(106, 176, 123, 0.15);
+  color: #6ab07b;
+}
+
+.badge-pending {
+  background: rgba(212, 160, 86, 0.15);
+  color: #d4a056;
+}
+
+.badge-declined {
+  background: rgba(199, 92, 92, 0.15);
+  color: #c75c5c;
+}
+
+.badge-completed {
+  background: rgba(91, 138, 154, 0.15);
+  color: #5b8a9a;
+}
+
+.badge-expired {
+  background: rgba(155, 163, 169, 0.15);
+  color: #9ba3a9;
+}
+
+/* Info variant — required by the documented "Created (info)" offer status
+   and the "Urgency 2 = info" mapping in dev_split.md */
+.badge-info {
+  background: rgba(123, 154, 204, 0.15);
+  color: #7b9acc;
+}
+
+/* ==========================================================================
+   6. Animations — Section 9
+   ========================================================================== */
+
+@keyframes organlink-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Page transitions: fade in content area (opacity 0 -> 1, 200ms ease) */
+.page-fade-in {
+  animation: organlink-fade-in 200ms ease both;
+}
+
+/* Login error: card shakes horizontally, 400ms */
+@keyframes organlink-shake {
+  10%,
+  90% {
+    transform: translateX(-2px);
+  }
+  20%,
+  80% {
+    transform: translateX(4px);
+  }
+  30%,
+  50%,
+  70% {
+    transform: translateX(-8px);
+  }
+  40%,
+  60% {
+    transform: translateX(8px);
+  }
+}
+
+.shake {
+  animation: organlink-shake 400ms ease both;
+}
+
+/* Viability < 1hr: pulsing red glow, 1.5s infinite */
+@keyframes organlink-pulse-danger {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(199, 92, 92, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(199, 92, 92, 0);
+  }
+}
+
+.pulse-danger {
+  animation: organlink-pulse-danger 1.5s ease-in-out infinite;
+}
+
+/* Match results load: cards stagger in from the right, 80ms apart.
+   Set --stagger-index on each card to sequence it. */
+@keyframes organlink-slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.stagger-in {
+  animation: organlink-slide-in-right 300ms ease both;
+  animation-delay: calc(var(--stagger-index, 0) * 80ms);
+}
+
+/* Status badge: subtle scale pop on status change */
+@keyframes organlink-badge-pop {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.1);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.badge-pop {
+  animation: organlink-badge-pop 200ms ease;
+}
+
+/* ==========================================================================
+   7. Accessibility — Section 10
+   ========================================================================== */
+
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-8);
+  padding: var(--space-40) var(--space-24);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ==========================================================================
+   8. App shell — Section 3
+   ========================================================================== */
+
+.app-shell {
+  display: flex;
+  min-height: 100vh;
+}
+
+.app-sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: var(--sidebar-width);
+  display: flex;
+  flex-direction: column;
+  padding: 0 var(--space-16) var(--space-24);
+  background: var(--bg-sidebar);
+  box-shadow: 4px 0 12px rgba(0, 0, 0, 0.04);
+  z-index: 100;
+}
+
+.app-sidebar__logo {
+  display: flex;
+  align-items: center;
+  height: 80px;
+  padding: 0 var(--space-8);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.app-nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.app-nav__divider {
+  height: 1px;
+  margin: var(--space-12) var(--space-8);
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  padding: var(--sidebar-item-padding);
+  border-radius: var(--radius-input);
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  background: transparent;
+  transition:
+    box-shadow 150ms ease,
+    background-color 150ms ease,
+    color 150ms ease;
+}
+
+.nav-item:hover {
+  background: var(--color-primary-light);
+}
+
+.nav-item.active,
+.nav-item.active:hover {
+  color: var(--color-primary);
+  background: var(--bg-sidebar);
+  box-shadow:
+    inset 4px 4px 8px var(--shadow-dark),
+    inset -4px -4px 8px var(--shadow-light);
+}
+
+.app-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  margin-left: var(--sidebar-width);
+}
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 90;
+  display: flex;
+  flex: 0 0 var(--header-height);
+  align-items: center;
+  justify-content: space-between;
+  height: var(--header-height);
+  padding: 0 var(--content-padding);
+  background: var(--bg-header);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.app-breadcrumb {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.app-user {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  padding: var(--space-4) var(--space-8);
+  border: none;
+  border-radius: var(--radius-button);
+  background: transparent;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background-color 150ms ease;
+}
+
+.app-user:hover {
+  background: var(--color-primary-light);
+}
+
+.app-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  color: var(--text-on-accent);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.app-content {
+  flex: 1;
+  padding: var(--content-padding);
+  overflow-y: auto;
+}
+
+/* ==========================================================================
+   9. Shared components
+   ========================================================================== */
+
+/* --- StatCard (Section 4.1) --- */
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  min-width: 160px;
+  padding: var(--card-padding);
+}
+
+.stat-card__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.stat-card__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+}
+
+.stat-card__trend {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.stat-card__trend--up {
+  color: var(--color-success);
+}
+
+.stat-card__trend--down {
+  color: var(--color-danger);
+}
+
+.stat-card__value {
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--text-primary);
+}
+
+.stat-card__label {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* --- DataTable (Section 4.2) --- */
+.data-table-paper {
+  padding: var(--card-padding);
+}
+
+.data-table-head-cell {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.data-table-row td {
+  height: 48px;
+  font-size: 14px;
+  font-family: 'Manrope', sans-serif;
+  transition: background-color 150ms ease;
+}
+
+.data-table-row:hover td {
+  background: var(--color-primary-light);
+}
+
+.data-table-paper .mantine-Input-input {
+  border: none;
+  background: var(--bg-base);
+  border-radius: var(--radius-input);
+  box-shadow:
+    inset 4px 4px 8px var(--shadow-dark),
+    inset -4px -4px 8px var(--shadow-light);
+}
+
+/* mantine-react-table sets its own className on the pagination root, so the
+   neumorphic pagination buttons hook onto its stable .mrt-table-pagination
+   class rather than a className passed through mantinePaginationProps. */
+.data-table-paper .mrt-table-pagination button:not([data-active]) {
+  border: none;
+  background: var(--bg-base);
+  border-radius: var(--radius-input);
+  box-shadow:
+    4px 4px 8px var(--shadow-dark),
+    -4px -4px 8px var(--shadow-light);
+  transition: box-shadow 100ms ease;
+}
+
+.data-table-paper .mrt-table-pagination button:not([data-active]):active {
+  box-shadow:
+    inset 3px 3px 6px var(--shadow-dark),
+    inset -3px -3px 6px var(--shadow-light);
+}
+
+/* --- FormModal (Section 4.4) --- */
+.form-modal__content {
+  background: var(--bg-base);
+  border-radius: var(--radius-card);
+  box-shadow:
+    8px 8px 16px var(--shadow-dark),
+    -8px -8px 16px var(--shadow-light);
+}
+
+.form-modal__body {
+  padding: var(--space-32);
+}
+
+.form-modal__header {
+  padding: var(--space-32) var(--space-32) 0;
+  background: transparent;
+}
+
+.form-modal__body .mantine-Input-input {
+  height: 44px;
+  min-height: 44px;
+  border: none;
+  background: var(--bg-base);
+  border-radius: var(--radius-input);
+  box-shadow:
+    inset 4px 4px 8px var(--shadow-dark),
+    inset -4px -4px 8px var(--shadow-light);
+}
+
+.form-modal__body textarea.mantine-Input-input {
+  height: auto;
+}
+
+.form-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-12);
+  margin-top: var(--space-24);
+}
+
+/* --- Placeholder pages (Phase 0 only) --- */
+.page-placeholder {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding: var(--card-padding);
+}
