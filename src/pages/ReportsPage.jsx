@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Button, Title } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
 import { IconDownload } from '@tabler/icons-react';
+import { generateAuditReportPdf } from './reportsAuditPdf.js';
 import {
   Bar,
   BarChart,
@@ -118,7 +119,12 @@ export default function ReportsPage() {
   const [dateRange, setDateRange] = useState([null, null]);
 
   const handleExportAuditReport = () => {
-    // Placeholder — PDF export is implemented in D1-05.
+    generateAuditReportPdf({
+      dateRange,
+      declineReasons: DECLINE_REASONS,
+      allocationFairness: ALLOCATION_FAIRNESS,
+      totalOrgans: TOTAL_ORGANS,
+    });
   };
 
   return (
