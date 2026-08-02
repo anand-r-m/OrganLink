@@ -1,11 +1,13 @@
-import { Text, Title } from '@mantine/core';
+import TransportMap from '../components/TransportMap.jsx';
 
 export default function TransportPage() {
   return (
-    <section className="page-placeholder neu-raised" aria-label="Transport">
-      <Title order={2}>Transport</Title>
-      <Text c="dimmed">Phase 0 placeholder — owned by Dev 1 (Task 1.4).</Text>
-    </section>
+    <div
+      className="transport-page"
+      style={{ display: 'flex', flexDirection: 'column', gap: 'var(--grid-gap)', minWidth: 0 }}
+      aria-label="Transport"
+    >
+      <TransportMap />
+    </div>
   );
 }
-
