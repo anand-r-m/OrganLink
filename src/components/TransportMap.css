@@ -1,0 +1,37 @@
+.transport-map-card {
+  height: 400px;
+  overflow: hidden;
+  padding: 0;
+}
+
+.transport-map {
+  height: 100%;
+  width: 100%;
+  z-index: 0;
+}
+
+.transport-map .leaflet-tile-pane {
+  filter: saturate(0.3) contrast(1.1);
+}
+
+.transport-hospital-marker {
+  fill: var(--color-primary);
+  stroke: var(--text-on-accent);
+  stroke-width: 2;
+}
+
+.transport-route {
+  fill: none;
+}
+
+.transport-route--active {
+  stroke: var(--color-primary);
+}
+
+.transport-route--delivered {
+  stroke: var(--color-success);
+}
+
+.transport-route--expired {
+  stroke: var(--color-danger);
+}

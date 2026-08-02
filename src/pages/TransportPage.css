@@ -1,0 +1,68 @@
+/* D1-07 transport records table — page-scoped visual polish */
+
+.transport-records-table.data-table-paper {
+  padding: var(--card-padding);
+  overflow: hidden;
+  min-width: 0;
+}
+
+.transport-records-table .mrt-top-toolbar {
+  margin-bottom: var(--space-16);
+  padding-inline: var(--space-4);
+}
+
+.transport-records-table .mrt-table-container {
+  overflow: auto hidden;
+  border-radius: var(--radius-input);
+  -webkit-overflow-scrolling: touch;
+}
+
+.transport-records-table .data-table {
+  width: 100%;
+  min-width: 920px;
+  table-layout: fixed;
+}
+
+.transport-records-table .data-table thead {
+  background: var(--bg-base);
+}
+
+.transport-records-table .data-table thead tr {
+  box-shadow: inset 0 -1px 0 rgba(197, 202, 211, 0.45);
+}
+
+.transport-records-table .data-table-head-cell {
+  padding: var(--space-12) var(--space-16);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.transport-records-table .data-table-row td {
+  padding: var(--space-12) var(--space-16);
+  vertical-align: middle;
+}
+
+/* IDs, organ type, hospitals, timestamps — left aligned */
+.transport-records-table .data-table thead th:nth-child(-n + 5),
+.transport-records-table .data-table thead th:nth-child(8),
+.transport-records-table .data-table tbody td:nth-child(-n + 5),
+.transport-records-table .data-table tbody td:nth-child(8) {
+  text-align: left;
+}
+
+/* Status + viability countdown — centered */
+.transport-records-table .data-table thead th:nth-child(6),
+.transport-records-table .data-table thead th:nth-child(7),
+.transport-records-table .data-table tbody td:nth-child(6),
+.transport-records-table .data-table tbody td:nth-child(7) {
+  text-align: center;
+}
+
+.transport-records-table .data-table tbody td:nth-child(7) > div {
+  max-width: 200px;
+  margin-inline: auto;
+}
+
+.transport-records-table .mantine-Input-input {
+  margin-bottom: 0;
+}

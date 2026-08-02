@@ -27,7 +27,7 @@ export const mockTransports = [
     destCoords: [12.9249, 79.1369],
     status: 'In Transit',
     viabilityHours: 6,
-    elapsedHours: 4,
+    elapsedHours: 5.5,
     departedAt: '2026-07-29T05:30:00',
   },
   {
