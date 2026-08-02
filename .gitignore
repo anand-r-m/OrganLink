@@ -28,3 +28,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Dev phase instruction files (agent prompts, not source)
+phase1.md
+phase2.md
+phase3.md

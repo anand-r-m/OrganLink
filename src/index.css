@@ -655,3 +655,64 @@ h3 {
   gap: var(--space-8);
   padding: var(--card-padding);
 }
+
+/* ==========================================================================
+   10. Settings tabs — neumorphic active state (phase2.md)
+   ========================================================================== */
+
+.settings-tab {
+  font-weight: 600;
+  font-size: 14px;
+  border-radius: var(--radius-input);
+  padding: 10px 20px;
+  border: none !important;
+  background: transparent;
+  color: var(--text-secondary);
+  transition: box-shadow 150ms ease, color 150ms ease;
+}
+
+.settings-tab:hover {
+  background: var(--color-primary-light);
+}
+
+.settings-tab[data-active] {
+  color: var(--color-primary);
+  background: var(--bg-base);
+  box-shadow: inset 4px 4px 8px var(--shadow-dark), inset -4px -4px 8px var(--shadow-light);
+}
+
+/* ==========================================================================
+   11. Phase 3 polish — compat cell hover, drawer overlay, score tooltip,
+       text truncation
+   ========================================================================== */
+
+/* Compatibility matrix cell hover */
+.compat-cell {
+  transition: all 100ms ease;
+}
+
+.compat-cell:hover {
+  opacity: 0.8;
+  transform: scale(1.05);
+}
+
+/* Drawer overlay — match FormModal overlay */
+.mantine-Drawer-overlay {
+  background: rgba(0, 0, 0, 0.3) !important;
+  backdrop-filter: blur(4px);
+}
+
+/* Priority score tooltip styling */
+.score-tooltip {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* Text truncation for long table cell values */
+.cell-truncate {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
