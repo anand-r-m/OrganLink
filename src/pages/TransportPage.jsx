@@ -31,13 +31,13 @@ export default function TransportPage() {
       {
         accessorKey: 'originHospital',
         header: 'Origin Hospital',
-        size: 130,
+        size: 110,
         mantineTableBodyCellProps: { style: { whiteSpace: 'normal' } },
       },
       {
         accessorKey: 'destHospital',
         header: 'Destination Hospital',
-        size: 130,
+        size: 110,
         mantineTableBodyCellProps: { style: { whiteSpace: 'normal' } },
       },
       {

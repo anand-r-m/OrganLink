@@ -17,6 +17,7 @@ export default function CircularProgress({ value, label }) {
   const clamped = clampValue(value);
   const displayValue = Math.round(clamped);
   const dashOffset = CIRCUMFERENCE - (clamped / 100) * CIRCUMFERENCE;
+  const ariaLabel = label ? `${label}: ${displayValue}%` : `${displayValue}%`;
 
   return (
     <figure
@@ -27,7 +28,7 @@ export default function CircularProgress({ value, label }) {
         alignItems: 'center',
         gap: 4,
       }}
-      aria-label={`${label}: ${displayValue}%`}
+      aria-label={ariaLabel}
     >
       <svg
         width={SIZE}
@@ -77,15 +78,17 @@ export default function CircularProgress({ value, label }) {
         </text>
       </svg>
 
-      <figcaption
-        style={{
-          fontSize: 11,
-          color: 'var(--text-muted)',
-          textAlign: 'center',
-        }}
-      >
-        {label}
-      </figcaption>
+      {label ? (
+        <figcaption
+          style={{
+            fontSize: 11,
+            color: 'var(--text-muted)',
+            textAlign: 'center',
+          }}
+        >
+          {label}
+        </figcaption>
+      ) : null}
     </figure>
   );
 }

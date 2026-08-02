@@ -278,7 +278,7 @@ export default function ReportsPage() {
                 <YAxis
                   type="category"
                   dataKey="reason"
-                  width={132}
+                  width={168}
                   tick={{ fill: 'var(--text-secondary)', fontSize: 11 }}
                   axisLine={false}
                   tickLine={false}
@@ -363,13 +363,13 @@ export default function ReportsPage() {
         >
           <div>
             <p
+              className="mono"
               style={{
                 margin: 0,
                 fontSize: 48,
                 fontWeight: 700,
                 lineHeight: 1.1,
                 color: 'var(--color-success)',
-                fontFamily: 'Manrope, sans-serif',
               }}
             >
               94.2%

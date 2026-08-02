@@ -19,6 +19,7 @@
 
 .transport-records-table .data-table {
   width: 100%;
+  min-width: 920px;
   table-layout: fixed;
 }
 
