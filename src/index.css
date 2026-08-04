@@ -868,3 +868,216 @@ h3 {
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
 }
 
+/* ==========================================================================
+   13. Matching Console — Dev 3 Task 3.2
+   ========================================================================== */
+
+.matching-layout {
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  gap: var(--space-20);
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .matching-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.matching-panel-left {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+  padding: var(--card-padding);
+}
+
+.matching-panel-right {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+}
+
+.donor-info-card {
+  padding: var(--space-16);
+  background: var(--bg-base);
+  border-radius: var(--radius-input);
+  box-shadow:
+    inset 3px 3px 6px var(--shadow-dark),
+    inset -3px -3px 6px var(--shadow-light);
+}
+
+.donor-info-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.donor-info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.donor-info-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.donor-info-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.slider-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.slider-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.slider-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.candidate-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-16);
+  padding: var(--space-20);
+  background: var(--bg-base);
+  box-shadow:
+    4px 4px 8px var(--shadow-dark),
+    -4px -4px 8px var(--shadow-light);
+  border-radius: var(--radius-card);
+  transition: transform 200ms ease, box-shadow 200ms ease;
+}
+
+.candidate-card:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    6px 6px 12px var(--shadow-dark),
+    -6px -6px 12px var(--shadow-light);
+}
+
+.candidate-rank {
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--color-primary);
+  min-width: 48px;
+  text-align: center;
+  line-height: 1;
+}
+
+.candidate-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.candidate-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.candidate-details {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  flex-wrap: wrap;
+}
+
+.candidate-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.distance-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.weight-summary-bar {
+  display: flex;
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--shadow-dark);
+  margin-top: 4px;
+}
+
+.weight-segment-hla {
+  background: var(--color-primary);
+  transition: width 0.2s ease;
+}
+
+.weight-segment-urgency {
+  background: var(--color-warning);
+  transition: width 0.2s ease;
+}
+
+.weight-segment-distance {
+  background: var(--color-info);
+  transition: width 0.2s ease;
+}
+
+.filtered-out-accordion {
+  margin-top: var(--space-8);
+  border-radius: var(--radius-card);
+}
+
+.filtered-out-accordion .mantine-Accordion-item {
+  background: var(--bg-base);
+  border: none;
+  box-shadow:
+    4px 4px 8px var(--shadow-dark),
+    -4px -4px 8px var(--shadow-light);
+  border-radius: var(--radius-card) !important;
+  overflow: hidden;
+}
+
+.filtered-out-accordion .mantine-Accordion-control {
+  border-radius: var(--radius-card);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.filtered-out-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+}
+
+.filtered-out-row:last-child {
+  border-bottom: none;
+}
+
+
