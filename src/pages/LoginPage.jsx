@@ -1,17 +1,27 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button, PasswordInput, Stack, Text, TextInput, Title } from '@mantine/core';
+import { IconAlertCircle } from '@tabler/icons-react';
 import { Navigate, useNavigate } from 'react-router-dom';
 
 import { useAuth } from '../context/AuthContext.jsx';
 
-/* Phase 0 placeholder — owned by Dev 3 (Task 3.1).
-   Minimal form so the documented auth redirect can be verified. */
 export default function LoginPage() {
   const { isAuthenticated, login } = useAuth();
   const navigate = useNavigate();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [isShaking, setIsShaking] = useState(false);
+  const [shakeKey, setShakeKey] = useState(0);
+  const shakeTimerRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (shakeTimerRef.current) {
+        clearTimeout(shakeTimerRef.current);
+      }
+    };
+  }, []);
 
   if (isAuthenticated) {
     return <Navigate to="/dashboard" replace />;
@@ -19,63 +29,83 @@ export default function LoginPage() {
 
   function handleSubmit(event) {
     event.preventDefault();
+
+    // Clear previous shake state
+    if (shakeTimerRef.current) {
+      clearTimeout(shakeTimerRef.current);
+    }
+    setIsShaking(false);
+
     if (login(username, password)) {
+      setError('');
       navigate('/dashboard', { replace: true });
       return;
     }
+
+    // On failed attempt, set exact error message and trigger shake animation
     setError('Invalid credentials');
+    setShakeKey((prev) => prev + 1);
+    setIsShaking(true);
+
+    shakeTimerRef.current = setTimeout(() => {
+      setIsShaking(false);
+    }, 400);
   }
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        minHeight: '100vh',
-        padding: 'var(--space-24)',
-      }}
-    >
+    <div className="login-page">
       <form
+        key={shakeKey}
         onSubmit={handleSubmit}
-        className="neu-raised"
-        style={{ width: 420, padding: 'var(--space-40)' }}
+        className={`login-card ${isShaking ? 'shake' : ''}`}
         aria-label="Sign in to OrganLink"
+        noValidate={false}
       >
-        <Stack gap="md">
+        <Stack gap="lg">
           <div>
-            <Title order={1} c="var(--color-primary)">
+            <Title order={1} style={{ color: '#ffffff', fontSize: 28, fontWeight: 700, letterSpacing: '-0.5px' }}>
               OrganLink
             </Title>
-            <Text c="dimmed">Transplant Operations Hub</Text>
+            <Text style={{ color: 'rgba(255, 255, 255, 0.75)', fontSize: 14, marginTop: 4 }}>
+              Transplant Operations Hub
+            </Text>
           </div>
 
           <TextInput
             label="Username"
+            placeholder="Enter your username"
             value={username}
             onChange={(event) => setUsername(event.currentTarget.value)}
             aria-label="Username"
             autoComplete="username"
+            className="login-input"
+            required
           />
+
           <PasswordInput
             label="Password"
+            placeholder="Enter your password"
             value={password}
             onChange={(event) => setPassword(event.currentTarget.value)}
             aria-label="Password"
             autoComplete="current-password"
+            className="login-input"
+            required
           />
 
-          <Button type="submit" fullWidth h={48} aria-label="Sign in">
+          <Button type="submit" fullWidth h={48} className="login-button">
             Sign In
           </Button>
 
           {error ? (
-            <Text c="var(--color-danger)" role="alert">
-              {error}
-            </Text>
+            <div className="login-error" role="alert" aria-live="assertive">
+              <IconAlertCircle size={18} aria-hidden="true" />
+              <span>{error}</span>
+            </div>
           ) : null}
         </Stack>
       </form>
     </div>
   );
 }
+
