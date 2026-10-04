@@ -172,3 +172,16 @@ No failures or debugging cycles.
 - Server (78), client (47) tests and the build passed after the fixes above. Lint shows no new warnings; I removed an unused import and un-exported two page constants to avoid fast-refresh warnings.
 - Environment: no Postgres was running. I started a throwaway PG 18 on port 5433 (`-k /tmp/ol15sock`, `LC_ALL=en_US.UTF-8`) and ran `db:reset --yes` against it.
 - The console effect that loads weights and the latest run was keyed on the selected organ object. Refreshing organs after creating an offer would have reset the sliders, so it is now keyed on `selectedKey`.
+
+## OL-016
+
+### Throwaway Postgres failed to start on the first attempt
+- **Symptom:** `pg_ctl start` printed "Examine the log output" and `db:reset` got ECONNREFUSED on 5433.
+- **Root cause:** I passed `-k /tmp/ol16sock` but the directory did not exist yet, so Postgres could not create its Unix socket (the OL-004/OL-012 lessons said to use a short socket dir, but not to create it first).
+- **Fix:** `mkdir -p /tmp/ol16sock`, then start again. `db:reset --yes` ran fine.
+- **Prevent/detect:** create the `-k` socket directory before `pg_ctl start`; the OL-033 README snippet should include `mkdir -p`.
+
+### Notes (no other failures)
+- The new server tests passed on the first run. They clone an AVAILABLE organ per scenario (INSERT ... SELECT) so accepting or expiring never leaves a seeded organ ALLOCATED or EXPIRED; EXPIRED organs cannot be reverted (only DISCARDED), so reusing a seeded organ for the expiry test would have damaged the demo data. Cleanup deletes the clones' transport, offers, runs and organs.
+- Skipping a prior decliner in Advance needs a test-only direct INSERT of a DECLINED offer, because the API cannot create a second DECLINED offer for a rank without walking through Advance.
+- New lint warning (`setRecipients` unused after the mock accept stopped marking recipients Transplanted) fixed in the same task.

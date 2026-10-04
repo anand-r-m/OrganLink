@@ -34,7 +34,7 @@ export const mockOffers = [
     recipientId: 'RCP-771-H',
     status: 'Accepted',
     offeredAt: '2026-07-27T09:20:00',
-    response: 'Accepted — transplant scheduled',
+    response: 'Accepted',
     declineReason: null,
   },
   {

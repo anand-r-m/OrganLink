@@ -18,6 +18,7 @@ export function adaptOffer(o) {
     status: o.status,
     offeredAt: o.createdAt,
     sentAt: o.sentAt,
+    respondedAt: o.respondedAt,
     offerExpiresAt: o.offerExpiresAt,
     response,
     declineReason: o.declineReasonCode,

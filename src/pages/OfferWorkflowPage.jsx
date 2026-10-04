@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   Button,
   Group,
   Paper,
@@ -34,8 +35,10 @@ import { mockOrgans } from '../data/mockOrgans.js';
 import { mockRecipients } from '../data/mockRecipients.js';
 
 import { USE_LIVE_API } from '../api/client.js';
-import { cancelOffer, listOffers, saveMockOffer, sendOffer } from '../api/offers.js';
+import { acceptOffer, advanceOffer, cancelOffer, declineOffer, listOffers, saveMockOffer, sendOffer } from '../api/offers.js';
+import { getLookups } from '../api/lookups.js';
 import { showApiError } from '../api/notify.js';
+import { recipientId } from '../utils/displayId.js';
 
 import {
   DECLINE_REASONS,
@@ -43,12 +46,10 @@ import {
   getAllowedTransitions,
   hasActiveOfferForOrgan,
   isActiveOfferStatus,
-  transitionOffer,
 } from '../utils/offerTransitions.js';
 
-// Accept, decline and advance are wired to the API in OL-016; until then they run on mock data only.
-const MOCK_ONLY_ACTIONS = !USE_LIVE_API;
-const ACCEPT_RESPONSE = 'Accepted — transplant scheduled';
+
+const ADVANCE_FROM = ['DECLINED', 'EXPIRED', 'VOIDED', 'CANCELLED'];
 
 function formatDateTime(value) {
   return value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '—';
@@ -65,7 +66,7 @@ export default function OfferWorkflowPage() {
   const [offers, setOffers] = useState([]);
   const [offersLoading, setOffersLoading] = useState(true);
   const [organs, setOrgans] = useState(mockOrgans);
-  const [recipients, setRecipients] = useState(mockRecipients);
+  const [recipients] = useState(mockRecipients);
 
   /* Create Offer modal */
   const [createOpen, createHandlers] = useDisclosure(false);
@@ -79,6 +80,11 @@ export default function OfferWorkflowPage() {
   const [declineReason, setDeclineReason] = useState('');
   const [declineNotes, setDeclineNotes] = useState('');
   const [declineErrors, setDeclineErrors] = useState({});
+  /* Live decline reasons come from /api/lookups (coded reasons); mock mode keeps its text list. */
+  const [declineOptions, setDeclineOptions] = useState(DECLINE_REASONS);
+  /* Result of the last Advance to Next: the new offer and the ranks that were skipped. */
+  const [advanceResult, setAdvanceResult] = useState(null);
+  const [busy, setBusy] = useState(false);
 
   /* The list comes from the API layer (live: GET /api/offers; mock: the shared mock store). */
   useEffect(() => {
@@ -87,6 +93,19 @@ export default function OfferWorkflowPage() {
       .then((rows) => !cancelled && setOffers(rows))
       .catch((err) => !cancelled && showApiError(err, 'Could not load offers'))
       .finally(() => !cancelled && setOffersLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!USE_LIVE_API) return undefined;
+    let cancelled = false;
+    getLookups()
+      .then((l) => {
+        if (!cancelled && l) setDeclineOptions(l.declineReasons.map((r) => ({ value: String(r.id), label: r.description })));
+      })
+      .catch((err) => !cancelled && showApiError(err, 'Could not load decline reasons'));
     return () => {
       cancelled = true;
     };
@@ -219,57 +238,58 @@ export default function OfferWorkflowPage() {
     resetCreateForm();
   }
 
-  function handleAccept() {
+  async function handleAccept() {
     const offer = acceptTarget;
-    if (!offer) return;
+    if (!offer || busy) return;
+    setBusy(true);
     try {
-      const updated = transitionOffer(offer, 'ACCEPTED', { response: ACCEPT_RESPONSE });
-      saveMockOffer(updated);
-      setOffers((prev) => prev.map((o) => (o.id === offer.id ? updated : o)));
-      setOrgans((prev) =>
-        prev.map((organ) => (organ.id === offer.organId ? { ...organ, status: 'Allocated' } : organ)),
-      );
-      setRecipients((prev) =>
-        prev.map((recipient) =>
-          recipient.id === offer.recipientId ? { ...recipient, status: 'Transplanted' } : recipient,
-        ),
-      );
+      replaceOffer(await acceptOffer(offer));
+      if (!USE_LIVE_API) {
+        setOrgans((prev) =>
+          prev.map((organ) => (organ.id === offer.organId ? { ...organ, status: 'Allocated' } : organ)),
+        );
+      }
       notifications.show({
         title: 'Offer accepted',
-        message: 'Transplant event recorded successfully',
+        message: 'Accepted: organ allocated, transport created',
         color: 'green',
       });
       setAcceptTarget(null);
     } catch (error) {
-      notifyError('Action blocked', error.message);
+      showApiError(error, 'Accept failed');
+      setAcceptTarget(null);
+      listOffers().then(setOffers).catch(() => {});
+    } finally {
+      setBusy(false);
     }
   }
 
-  function handleDecline() {
+  async function handleDecline() {
     const offer = declineTarget;
-    if (!offer) return;
+    if (!offer || busy) return;
     const errors = {};
     if (!declineReason) errors.reason = 'Select a decline reason';
     setDeclineErrors(errors);
     if (Object.keys(errors).length > 0) return;
 
+    setBusy(true);
     try {
-      const updated = transitionOffer(offer, 'DECLINED', {
-        response: declineReason,
-        declineReason,
-        declineNotes: declineNotes.trim() || undefined,
-      });
-      saveMockOffer(updated);
-      setOffers((prev) => prev.map((o) => (o.id === offer.id ? updated : o)));
+      replaceOffer(await declineOffer(offer, { reason: declineReason, notes: declineNotes.trim() }));
+      const label = declineOptions.find((o) => (o.value ?? o) === declineReason);
       notifications.show({
         title: 'Offer declined',
-        message: `${offer.id} declined — ${declineReason}`,
+        message: `${offer.id} declined — ${label?.label ?? declineReason}`,
         color: 'orange',
       });
       setDeclineTarget(null);
       resetDeclineForm();
     } catch (error) {
-      notifyError('Action blocked', error.message);
+      showApiError(error, 'Decline failed');
+      setDeclineTarget(null);
+      resetDeclineForm();
+      listOffers().then(setOffers).catch(() => {});
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -293,7 +313,32 @@ export default function OfferWorkflowPage() {
     );
   }
 
+  /* Live: POST /advance walks the run's ranks; the result lists the ranks it skipped. Mock: the
+     Create Offer modal is pre-filled with the next candidate. */
+  async function handleAdvanceLive(offer) {
+    if (busy) return;
+    setBusy(true);
+    setAdvanceResult(null);
+    try {
+      const { offer: created, skipped } = await advanceOffer(offer);
+      setOffers(await listOffers());
+      setAdvanceResult({ from: offer.id, offer: created, skipped });
+      notifications.show({
+        title: 'Advanced to next',
+        message: `${created.id} created for ${created.recipientId}${created.rank ? ` (rank ${created.rank})` : ''}`,
+        color: 'green',
+      });
+    } catch (error) {
+      if (error.details?.skipped?.length) setAdvanceResult({ from: offer.id, offer: null, skipped: error.details.skipped });
+      showApiError(error, 'Advance failed');
+      listOffers().then(setOffers).catch(() => {});
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function handleAdvanceToNext(offer) {
+    if (USE_LIVE_API) return handleAdvanceLive(offer);
     if (hasActiveOfferForOrgan(offers, offer.organId)) {
       notifyError(
         'Active offer exists',
@@ -331,7 +376,7 @@ export default function OfferWorkflowPage() {
         onClick: () => handleSendOffer(offer),
       });
     }
-    if (MOCK_ONLY_ACTIONS && transitions.includes('ACCEPTED')) {
+    if (transitions.includes('ACCEPTED')) {
       actions.push({
         label: 'Record Accept',
         variant: 'filled',
@@ -340,7 +385,7 @@ export default function OfferWorkflowPage() {
         onClick: () => setAcceptTarget(offer),
       });
     }
-    if (MOCK_ONLY_ACTIONS && transitions.includes('DECLINED')) {
+    if (transitions.includes('DECLINED')) {
       actions.push({
         label: 'Record Decline',
         variant: 'light',
@@ -361,7 +406,7 @@ export default function OfferWorkflowPage() {
         onClick: () => handleCancelOffer(offer),
       });
     }
-    if (MOCK_ONLY_ACTIONS && offer.status === 'DECLINED') {
+    if (ADVANCE_FROM.includes(offer.status) && (!USE_LIVE_API || offer.matchRunId)) {
       actions.push({
         label: 'Advance to Next',
         variant: 'subtle',
@@ -541,6 +586,38 @@ export default function OfferWorkflowPage() {
         ))}
       </div>
 
+      {advanceResult ? (
+        <Alert
+          color={advanceResult.offer ? 'blue' : 'red'}
+          title={
+            advanceResult.offer
+              ? `Advanced from ${advanceResult.from}: ${advanceResult.offer.id} created for ${advanceResult.offer.recipientId}`
+              : `No eligible candidate after ${advanceResult.from}`
+          }
+          withCloseButton
+          onClose={() => setAdvanceResult(null)}
+          style={{ marginBottom: 16 }}
+          aria-label="Advance result"
+        >
+          {advanceResult.skipped.length === 0 ? (
+            <Text size="sm">No ranks were skipped.</Text>
+          ) : (
+            <>
+              <Text size="sm">Skipped ranks:</Text>
+              <ul style={{ margin: 0, paddingLeft: 18 }}>
+                {advanceResult.skipped.map((s) => (
+                  <li key={s.rank}>
+                    <Text size="sm">
+                      Rank {s.rank} — {s.recipientName} ({recipientId(s.recipientId)}): {s.reason}
+                    </Text>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </Alert>
+      ) : null}
+
       {/* Table */}
       <DataTable
         columns={columns}
@@ -650,7 +727,8 @@ export default function OfferWorkflowPage() {
         opened={!!acceptTarget}
         onClose={() => setAcceptTarget(null)}
         title="Record Accept"
-        submitLabel="Confirm Transplant"
+        submitLabel="Record Accept"
+        loading={busy}
         onSubmit={handleAccept}
         size="md"
       >
@@ -708,8 +786,8 @@ export default function OfferWorkflowPage() {
           </Paper>
 
           <Text size="sm" c="var(--text-secondary)">
-            Confirming this transplant marks the organ as Allocated and the recipient as
-            Transplanted, and records a transplant event.
+            Recording acceptance marks the organ as Allocated and creates a transport record.
+            Surgery is recorded separately as a transplant.
           </Text>
         </Stack>
       </FormModal>
@@ -723,6 +801,7 @@ export default function OfferWorkflowPage() {
         }}
         title="Record Decline"
         submitLabel="Record Decline"
+        loading={busy}
         onSubmit={handleDecline}
         size="md"
       >
@@ -736,7 +815,7 @@ export default function OfferWorkflowPage() {
             label="Decline Reason"
             required
             placeholder="Select a reason"
-            data={DECLINE_REASONS}
+            data={declineOptions}
             value={declineReason}
             onChange={(value) => setDeclineReason(value ?? '')}
             error={declineErrors.reason}

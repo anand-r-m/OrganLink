@@ -9,7 +9,7 @@ let mockRows = mockOffers.map(adaptMockOffer);
 export const resetMockOffers = () => {
   mockRows = mockOffers.map(adaptMockOffer);
 };
-// Mock accept/decline (live in OL-016) still run in the page; it persists their result here.
+// Mock-mode Create Offer modal (page) persists its result here.
 export const saveMockOffer = (row) => {
   mockRows = mockRows.some((o) => o.id === row.id) ? mockRows.map((o) => (o.id === row.id ? row : o)) : [row, ...mockRows];
 };
@@ -71,4 +71,34 @@ export async function sendOffer(offer, live = USE_LIVE_API) {
 export async function cancelOffer(offer, live = USE_LIVE_API) {
   if (!live) return mockTransition(offer, 'CANCELLED');
   return adaptOffer(await apiFetch(`/offers/${offer.dbId}/cancel`, { method: 'POST' }));
+}
+
+// POST /api/offers/:id/accept: SENT -> ACCEPTED. The server allocates the organ and creates the transport.
+export async function acceptOffer(offer, { notes } = {}, live = USE_LIVE_API) {
+  if (!live) return mockTransition(offer, 'ACCEPTED', { response: 'Accepted', respondedAt: new Date().toISOString() });
+  return adaptOffer(await apiFetch(`/offers/${offer.dbId}/accept`, { method: 'POST', body: { notes: notes || undefined } }));
+}
+
+// POST /api/offers/:id/decline: SENT -> DECLINED. `reason` is a decline_reason id live, or the mock reason text.
+export async function declineOffer(offer, { reason, notes } = {}, live = USE_LIVE_API) {
+  if (!live) {
+    return mockTransition(offer, 'DECLINED', {
+      response: reason,
+      declineReason: reason,
+      declineNotes: notes || undefined,
+    });
+  }
+  return adaptOffer(
+    await apiFetch(`/offers/${offer.dbId}/decline`, {
+      method: 'POST',
+      body: { declineReasonId: Number(reason), notes: notes || undefined },
+    }),
+  );
+}
+
+// POST /api/offers/:id/advance: offers the organ to the next eligible rank of the same run.
+// Resolves to { offer, skipped } (live only; mock mode advances through the Create Offer modal).
+export async function advanceOffer(offer) {
+  const res = await apiFetch(`/offers/${offer.dbId}/advance`, { method: 'POST' });
+  return { offer: adaptOffer(res.offer), skipped: res.skipped };
 }

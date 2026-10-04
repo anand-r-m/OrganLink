@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { cancelOffer, createOffer, hasActiveMockOffer, listOffers, resetMockOffers, sendOffer } from '../../src/api/offers.js'
+import { acceptOffer, advanceOffer, cancelOffer, createOffer, declineOffer, hasActiveMockOffer, listOffers, resetMockOffers, sendOffer } from '../../src/api/offers.js'
 import { adaptOffer } from '../../src/api/adapters/offers.js'
 import { listOrgans } from '../../src/api/organs.js'
 import { getStatusVariant } from '../../src/utils/status.js'
@@ -120,4 +120,56 @@ test('offers page wiring: loads from the API layer, Send and Cancel use it', () 
   assert.match(src, /await cancelOffer\(offer\)/)
   assert.match(src, /Response Deadline/)
   assert.doesNotMatch(src, /import \{ mockOffers \}/)
+})
+
+test('live accept, decline and advance POST the contract bodies', async () => {
+  let calls = mockFetch({ ...apiOffer, status: 'ACCEPTED', transport: { id: 3, status: 'PENDING' } })
+  assert.equal((await acceptOffer({ dbId: 12 }, { notes: 'ok' }, true)).status, 'ACCEPTED')
+  assert.equal(calls[0].url, '/api/offers/12/accept')
+  assert.deepEqual(JSON.parse(calls[0].init.body), { notes: 'ok' })
+
+  calls = mockFetch({ ...apiOffer, status: 'DECLINED', declineReasonCode: 'ORGAN_QUALITY' })
+  const d = await declineOffer({ dbId: 12 }, { reason: '2', notes: 'fibrosis' }, true)
+  assert.equal(d.response, 'ORGAN_QUALITY')
+  assert.equal(calls[0].url, '/api/offers/12/decline')
+  assert.deepEqual(JSON.parse(calls[0].init.body), { declineReasonId: 2, notes: 'fibrosis' })
+
+  const skipped = [{ rank: 2, recipientId: 131, recipientName: 'A. Rao', reasonCode: 'RECIPIENT_ALREADY_DECLINED', reason: 'x' }]
+  calls = mockFetch({ offer: { ...apiOffer, status: 'CREATED' }, skipped }, 201)
+  const a = await advanceOffer({ dbId: 12 })
+  assert.equal(calls[0].url, '/api/offers/12/advance')
+  assert.equal(calls[0].init.method, 'POST')
+  assert.equal(a.offer.status, 'CREATED')
+  assert.deepEqual(a.skipped, skipped)
+})
+
+test('live advance surfaces 422 NO_ELIGIBLE_CANDIDATE with the skipped list', async () => {
+  mockFetch({ error: { code: 'NO_ELIGIBLE_CANDIDATE', message: 'No remaining ranked candidate could be offered', details: { skipped: [] } } }, 422)
+  await assert.rejects(advanceOffer({ dbId: 12 }), (e) => e.status === 422 && e.code === 'NO_ELIGIBLE_CANDIDATE' && Array.isArray(e.details.skipped))
+})
+
+test('mock mode: accept and decline persist through the shared store', async () => {
+  const organ = { id: 'K-9998', organType: 'Kidney', donor: 'DNR-1' }
+  const sent = await sendOffer(await createOffer({ organ, candidate: { recipient: 'RCP-1', rank: 1 }, run: {} }, false), false)
+  const accepted = await acceptOffer(sent, {}, false)
+  assert.equal(accepted.status, 'ACCEPTED')
+  assert.equal(accepted.response, 'Accepted')
+  const sent2 = await sendOffer(await createOffer({ organ: { ...organ, id: 'K-9997' }, candidate: { recipient: 'RCP-2', rank: 1 }, run: {} }, false), false)
+  const declined = await declineOffer(sent2, { reason: 'Other', notes: 'n' }, false)
+  assert.equal(declined.status, 'DECLINED')
+  assert.equal(declined.declineReason, 'Other')
+  await assert.rejects(async () => acceptOffer(declined, {}, false), /Invalid offer transition/)
+})
+
+test('offers page wiring: accept, decline and advance use the API layer and the new texts', () => {
+  const src = readFileSync(new URL('../../src/pages/OfferWorkflowPage.jsx', import.meta.url), 'utf8')
+  assert.match(src, /await acceptOffer\(offer\)/)
+  assert.match(src, /await declineOffer\(offer,/)
+  assert.match(src, /await advanceOffer\(offer\)/)
+  assert.match(src, /Accepted: organ allocated, transport created/)
+  assert.match(src, /getLookups\(\)/)
+  assert.match(src, /Skipped ranks:/)
+  assert.doesNotMatch(src, /transplant scheduled/i)
+  assert.doesNotMatch(src, /Confirm Transplant/)
+  assert.doesNotMatch(src, /MOCK_ONLY_ACTIONS/)
 })
