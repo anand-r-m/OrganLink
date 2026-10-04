@@ -204,3 +204,10 @@ No failures or debugging cycles.
 - Postgres and `.env` were already in place; server (97) and client (66) tests passed on the first run. No debugging cycles.
 - A transplant cascade changes seeded data permanently: the recipient's waitlist entry becomes TRANSPLANTED and cannot be undone through the API. The server tests therefore record each touched entry first and restore it in `test.after` (and delete any extra entry they insert), along with the cloned organs, offers, transports and transplants. Cleanup must delete `transplant_event` before `organ_offer` (RESTRICT FK).
 - My first draft of the "offer not accepted" test was convoluted and could silently return early. I rewrote it to build its own CREATED offer on a cloned organ. **Prevent:** a test that can `return` before asserting should be rewritten to create its own fixture.
+
+## OL-019
+
+### Notes (no failures)
+- Postgres and `.env` were already in place; the script passed on the first run (about 1 s after reset, against a 30 s budget). No debugging cycles.
+- The match order is data-dependent: a same-hospital accept makes the transport DELIVERED immediately, so `depart` would 409. The script therefore tries donor/organ-type pairs until the top two candidates are at hospitals other than the recovering one. **Prevent:** do not hard-code ids in a smoke script; select fixtures from the API and assert the preconditions.
+- The script is re-runnable without a reset (each run procures a new organ), but the ticket requires `db:reset` first, and it consumes seeded waitlist entries, so reset before demos.

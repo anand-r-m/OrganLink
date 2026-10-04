@@ -12,7 +12,8 @@
     "test:server": "node --test --test-concurrency=1 tests/server/*.test.js",
     "test:client": "node --test tests/client/*.test.js",
     "preview": "vite preview",
-    "db:reset": "bash scripts/db-reset.sh"
+    "db:reset": "bash scripts/db-reset.sh",
+    "smoke": "bash scripts/smoke-flow.sh"
   },
   "dependencies": {
     "@mantine/core": "^7.17.8",
