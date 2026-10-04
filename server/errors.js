@@ -32,6 +32,14 @@ export function translatePgError(e) {
       return new ApiError(400, 'VALIDATION_ERROR', e.message, {})
     case '23502':
       return new ApiError(400, 'VALIDATION_ERROR', e.message, e.column ? { fields: [e.column] } : {})
+    case '23001':
+      // ON DELETE RESTRICT FKs raise restrict_violation (not 23503) when a referenced row is deleted.
+      return new ApiError(
+        409,
+        'REFERENCE_IN_USE',
+        'This record is referenced by other data and cannot be deleted',
+        withConstraint(e),
+      )
     case '23503':
       // DELETE reports the referencing table via "is still referenced"; INSERT/UPDATE via "is not present".
       if (/is still referenced/.test(e.message ?? '')) {

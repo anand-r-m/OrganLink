@@ -213,6 +213,7 @@ test('translatePgError maps the contract table', () => {
     [t('23505', { constraint: 'some_key' }), 409, 'DUPLICATE'],
     [t('23503', { constraint: 'fk_x', message: 'insert violates ... is not present in table' }), 400, 'REFERENCE_NOT_FOUND'],
     [t('23503', { constraint: 'fk_x', message: 'delete violates ... is still referenced from table' }), 409, 'REFERENCE_IN_USE'],
+    [t('23001', { constraint: 'fk_x', message: 'violates RESTRICT setting of foreign key' }), 409, 'REFERENCE_IN_USE'],
     [t('23514', { constraint: 'ck_organ_not_future' }), 400, 'CONSTRAINT_VIOLATION'],
     [t('23502', { column: 'name' }), 400, 'VALIDATION_ERROR'],
     [t('40001'), 409, 'CONFLICT_RETRY'],

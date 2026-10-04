@@ -1,45 +1,41 @@
 import { jsPDF } from 'jspdf';
 import { autoTable } from 'jspdf-autotable';
 import dayjs from 'dayjs';
-import { mockOffers } from '../data/mockOffers.js';
+import { EMPTY } from '../api/adapters/reports.js';
 
 const MARGIN = 14;
 const FOOTER_Y_OFFSET = 10;
 
-function formatCell(value) {
+export function formatCell(value) {
   if (value === null || value === undefined || value === '') {
-    return '—';
+    return EMPTY;
   }
   return String(value);
 }
 
-function formatDateRange(dateRange) {
+export function formatDateRange(dateRange) {
   const [start, end] = dateRange ?? [null, null];
   if (!start && !end) {
-    return 'All available mock data';
+    return 'All dates';
   }
-  const startLabel = start ? dayjs(start).format('MMM D, YYYY') : '—';
-  const endLabel = end ? dayjs(end).format('MMM D, YYYY') : '—';
+  const startLabel = start ? dayjs(start).format('MMM D, YYYY') : EMPTY;
+  const endLabel = end ? dayjs(end).format('MMM D, YYYY') : EMPTY;
   return `${startLabel} — ${endLabel}`;
 }
 
-function filterOffersByDateRange(offers, dateRange) {
+// Inclusive on both bounds (whole days); a null bound is open. Offers carry `offeredAt` (the
+// offer's createdAt in live mode; the mock timestamp in mock mode).
+export function filterOffersByDateRange(offers, dateRange) {
   const [start, end] = dateRange ?? [null, null];
+  const rows = offers ?? [];
   if (!start && !end) {
-    return offers;
+    return rows;
   }
-
-  return offers.filter((offer) => {
-    const offeredAt = dayjs(offer.offeredAt);
-    if (!offeredAt.isValid()) {
-      return false;
-    }
-    if (start && offeredAt.isBefore(dayjs(start).startOf('day'))) {
-      return false;
-    }
-    if (end && offeredAt.isAfter(dayjs(end).endOf('day'))) {
-      return false;
-    }
+  return rows.filter((offer) => {
+    const at = dayjs(offer.offeredAt ?? offer.createdAt);
+    if (!at.isValid()) return false;
+    if (start && at.isBefore(dayjs(start).startOf('day'))) return false;
+    if (end && at.isAfter(dayjs(end).endOf('day'))) return false;
     return true;
   });
 }
@@ -81,155 +77,105 @@ function addSectionTitle(doc, title, y) {
   return nextY + 6;
 }
 
-function buildSummaryRows(filteredOffers, totalOrgans) {
-  const accepted = filteredOffers.filter((offer) => offer.status === 'Accepted').length;
-  const declined = filteredOffers.filter((offer) => offer.status === 'Declined').length;
-  const pending = filteredOffers.filter((offer) =>
-    ['Created', 'Sent'].includes(offer.status),
-  ).length;
-
+export function buildSummaryRows(filteredOffers, compliance) {
+  const c = compliance ?? {};
+  const count = (...statuses) => filteredOffers.filter((o) => statuses.includes(o.status)).length;
   return [
-    ['Overall compliance score', '94.2%'],
-    ['Response time average', '2.3h'],
-    ['Viability window compliance', '97%'],
-    ['ABO match rate', '100%'],
-    ['Total organs allocated (by region)', formatCell(totalOrgans)],
-    ['Total offers in period', formatCell(filteredOffers.length)],
-    ['Accepted offers', formatCell(accepted)],
-    ['Declined offers', formatCell(declined)],
-    ['Pending offers', formatCell(pending)],
+    ['Total organs (all time)', formatCell(c.totalOrgans)],
+    ['Organs transplanted (all time)', formatCell(c.transplanted)],
+    ['Organs expired unallocated (all time)', formatCell(c.expiredUnallocated)],
+    ['Organs discarded (all time)', formatCell(c.discarded)],
+    ['Placement rate (all time)', c.placementRatePct == null ? EMPTY : `${c.placementRatePct}%`],
+    ['Offers in selected period', formatCell(filteredOffers.length)],
+    ['Accepted offers', formatCell(count('ACCEPTED'))],
+    ['Declined offers', formatCell(count('DECLINED'))],
+    ['Pending offers (created or sent)', formatCell(count('CREATED', 'SENT'))],
+    ['Expired or voided offers', formatCell(count('EXPIRED', 'VOIDED'))],
   ];
 }
 
-function buildAllocationRows(offers) {
-  return offers.map((offer) => [
-    formatCell(offer.id),
-    formatCell(offer.organId),
-    formatCell(offer.organType),
-    formatCell(offer.donorId),
-    formatCell(offer.recipientId),
-    formatCell(offer.status),
-    offer.offeredAt ? dayjs(offer.offeredAt).format('MMM D, YYYY h:mm A') : '—',
-    formatCell(offer.response ?? offer.declineReason ?? offer.status),
+export const OFFER_HEAD = ['Offer ID', 'Organ type', 'Recipient', 'Status', 'Created'];
+
+export function buildOfferRows(offers) {
+  if (!offers?.length) return [[EMPTY, EMPTY, EMPTY, EMPTY, EMPTY]];
+  return offers.map((o) => [
+    formatCell(o.id),
+    formatCell(o.organType),
+    formatCell(o.recipientName ?? o.recipientId),
+    formatCell(o.status),
+    o.offeredAt ? dayjs(o.offeredAt).format('MMM D, YYYY h:mm A') : EMPTY,
   ]);
 }
 
-function buildDeclineReasonRows(declineReasons) {
-  if (!declineReasons?.length) {
-    return [['—', '—']];
-  }
+export const DECLINE_HEAD = ['Decline reason', 'Occurrences', 'Share'];
 
-  return declineReasons.map((item) => [
-    formatCell(item.reason),
-    formatCell(item.count),
+export function buildDeclineReasonRows(declineReasons) {
+  if (!declineReasons?.length) return [[EMPTY, EMPTY, EMPTY]];
+  return declineReasons.map((r) => [
+    formatCell(r.reason ?? r.description ?? r.code),
+    formatCell(r.count ?? r.occurrences),
+    r.pct == null ? EMPTY : `${r.pct}%`,
   ]);
 }
 
-function buildFairnessRows(allocationFairness) {
-  if (!allocationFairness?.length) {
-    return [['—', '—', '—', '—']];
-  }
+export const FAIRNESS_HEAD = ['Region', 'Waitlist size', 'Transplants completed', 'Allocation rate %', 'Median wait (days)', 'Retention %'];
 
-  return allocationFairness.map((item) => {
-    const actual = Number(item.actual ?? 0);
-    const expected = Number(item.expected ?? 0);
-    const variance = actual - expected;
-    const varianceLabel = variance > 0 ? `+${variance}` : String(variance);
-
-    return [
-      formatCell(item.region),
-      formatCell(item.actual),
-      formatCell(item.expected),
-      varianceLabel,
-    ];
-  });
+export function buildFairnessRows(fairness) {
+  if (!fairness?.length) return [[EMPTY, EMPTY, EMPTY, EMPTY, EMPTY, EMPTY]];
+  return fairness.map((r) => [
+    formatCell(r.region ?? r.regionName),
+    formatCell(r.waitlistSize),
+    formatCell(r.transplantsCompleted),
+    formatCell(r.allocationRatePct),
+    formatCell(r.medianWaitDays),
+    formatCell(r.retentionPct),
+  ]);
 }
 
-export function generateAuditReportPdf({
-  dateRange,
-  declineReasons,
-  allocationFairness,
-  totalOrgans,
-}) {
+const TABLE = {
+  theme: 'grid',
+  headStyles: { fillColor: [41, 98, 255], textColor: 255 },
+  margin: { left: MARGIN, right: MARGIN, bottom: FOOTER_Y_OFFSET + 8 },
+};
+
+// Builds the document without saving it, so tests can read it. `offers`, `declineReasons`,
+// `fairness` and `compliance` are the adapted rows the Reports page already holds.
+export function buildAuditReportPdf({ dateRange, offers, declineReasons, fairness, compliance }) {
   const doc = new jsPDF();
-  const filteredOffers = filterOffersByDateRange(mockOffers, dateRange);
+  const filteredOffers = filterOffersByDateRange(offers, dateRange);
   let y = MARGIN;
 
   doc.setFontSize(18);
   doc.setFont('helvetica', 'bold');
   doc.text('OrganLink — Audit Report', MARGIN, y);
   y += 10;
-
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
-  doc.text(formatDateRange(dateRange), MARGIN, y);
+  doc.text(`Offer period: ${formatDateRange(dateRange)}`, MARGIN, y);
   y += 6;
   doc.text(`Generated: ${dayjs().format('MMM D, YYYY h:mm A')}`, MARGIN, y);
   y += 12;
 
   y = addSectionTitle(doc, 'Section 1 — Summary Statistics', y);
-  autoTable(doc, {
-    startY: y,
-    head: [['Metric', 'Value']],
-    body: buildSummaryRows(filteredOffers, totalOrgans),
-    theme: 'grid',
-    styles: { fontSize: 9, cellPadding: 3 },
-    headStyles: { fillColor: [41, 98, 255], textColor: 255 },
-    margin: { left: MARGIN, right: MARGIN, bottom: FOOTER_Y_OFFSET + 8 },
-  });
+  autoTable(doc, { ...TABLE, startY: y, head: [['Metric', 'Value']], body: buildSummaryRows(filteredOffers, compliance), styles: { fontSize: 9, cellPadding: 3 } });
   y = doc.lastAutoTable.finalY + 12;
 
-  y = addSectionTitle(doc, 'Section 2 — Allocation History', y);
-  autoTable(doc, {
-    startY: y,
-    head: [[
-      'Offer ID',
-      'Organ ID',
-      'Type',
-      'Donor ID',
-      'Recipient ID',
-      'Status',
-      'Offered At',
-      'Outcome',
-    ]],
-    body: buildAllocationRows(filteredOffers),
-    theme: 'grid',
-    styles: { fontSize: 8, cellPadding: 2, overflow: 'linebreak' },
-    headStyles: { fillColor: [41, 98, 255], textColor: 255 },
-    columnStyles: {
-      0: { cellWidth: 22 },
-      6: { cellWidth: 28 },
-      7: { cellWidth: 30 },
-    },
-    margin: { left: MARGIN, right: MARGIN, bottom: FOOTER_Y_OFFSET + 8 },
-  });
+  y = addSectionTitle(doc, 'Section 2 — Offers in Period', y);
+  autoTable(doc, { ...TABLE, startY: y, head: [OFFER_HEAD], body: buildOfferRows(filteredOffers), styles: { fontSize: 8, cellPadding: 2, overflow: 'linebreak' } });
   y = doc.lastAutoTable.finalY + 12;
 
   y = addSectionTitle(doc, 'Section 3 — Decline Reason Breakdown', y);
-  autoTable(doc, {
-    startY: y,
-    head: [['Decline Reason', 'Count']],
-    body: buildDeclineReasonRows(declineReasons),
-    theme: 'grid',
-    styles: { fontSize: 9, cellPadding: 3 },
-    headStyles: { fillColor: [41, 98, 255], textColor: 255 },
-    margin: { left: MARGIN, right: MARGIN, bottom: FOOTER_Y_OFFSET + 8 },
-  });
+  autoTable(doc, { ...TABLE, startY: y, head: [DECLINE_HEAD], body: buildDeclineReasonRows(declineReasons), styles: { fontSize: 9, cellPadding: 3 } });
   y = doc.lastAutoTable.finalY + 12;
 
   y = addSectionTitle(doc, 'Section 4 — Regional Fairness Metrics', y);
-  autoTable(doc, {
-    startY: y,
-    head: [['Region', 'Actual Allocation', 'Expected Allocation', 'Variance']],
-    body: buildFairnessRows(allocationFairness),
-    theme: 'grid',
-    styles: { fontSize: 9, cellPadding: 3 },
-    headStyles: { fillColor: [41, 98, 255], textColor: 255 },
-    margin: { left: MARGIN, right: MARGIN, bottom: FOOTER_Y_OFFSET + 8 },
-  });
+  autoTable(doc, { ...TABLE, startY: y, head: [FAIRNESS_HEAD], body: buildFairnessRows(fairness), styles: { fontSize: 8, cellPadding: 3 } });
 
   addFooter(doc);
+  return doc;
+}
 
-  const fileName = `OrganLink_Audit_Report_${dayjs().format('YYYY-MM-DD')}.pdf`;
-  doc.save(fileName);
+export function generateAuditReportPdf(data) {
+  const doc = buildAuditReportPdf(data);
+  doc.save(`OrganLink_Audit_Report_${dayjs().format('YYYY-MM-DD')}.pdf`);
 }

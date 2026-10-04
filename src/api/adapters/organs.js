@@ -47,3 +47,20 @@ export function adaptMockOrgan(m) {
     activeOfferId: null,
   };
 }
+
+// Discard is offered only while an organ is AVAILABLE or EXPIRED; ALLOCATED, TRANSPLANTED and
+// DISCARDED are terminal for this action (API_CONTRACT organs/:id/discard).
+export const canDiscard = (organ) => organ?.status === 'AVAILABLE' || organ?.status === 'EXPIRED';
+
+export const DISCARD_BLOCKED_TOOLTIP = 'Cancel the active offer before discarding';
+
+// Lookup discard reasons -> Select options ("CODE - description").
+export const discardReasonOptions = (reasons = []) =>
+  reasons.map((r) => ({ value: String(r.id), label: `${r.code} - ${r.description}` }));
+
+// An EXPIRED organ defaults to VIABILITY_ELAPSED (06: the candidate chain ran out); otherwise no default.
+export function defaultDiscardReasonId(organ, reasons = []) {
+  if (organ?.status !== 'EXPIRED') return null;
+  const hit = reasons.find((r) => r.code === 'VIABILITY_ELAPSED');
+  return hit ? String(hit.id) : null;
+}

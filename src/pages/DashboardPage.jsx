@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Title } from '@mantine/core';
 import {
   IconActivity,
@@ -21,45 +21,9 @@ import { Link } from 'react-router-dom';
 import DataTable from '../components/DataTable.jsx';
 import StatCard from '../components/StatCard.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
-import { mockOffers } from '../data/mockOffers.js';
-
-const ALLOCATION_TRENDS = [
-  { month: 'Jan', count: 18 },
-  { month: 'Feb', count: 22 },
-  { month: 'Mar', count: 26 },
-  { month: 'Apr', count: 24 },
-  { month: 'May', count: 31 },
-  { month: 'Jun', count: 28 },
-  { month: 'Jul', count: 35 },
-  { month: 'Aug', count: 32 },
-  { month: 'Sep', count: 38 },
-  { month: 'Oct', count: 41 },
-  { month: 'Nov', count: 36 },
-  { month: 'Dec', count: 44 },
-];
-
-const CRITICAL_ALERTS = [
-  {
-    urgency: 'danger',
-    message: 'Organ K-0912 viability expires in 2h 15m',
-    timestamp: '10 mins ago',
-  },
-  {
-    urgency: 'warning',
-    message: '3 offers pending response > 4 hours',
-    timestamp: '25 mins ago',
-  },
-  {
-    urgency: 'danger',
-    message: 'Transport T-882 delayed — viability window narrowing',
-    timestamp: '42 mins ago',
-  },
-  {
-    urgency: 'info',
-    message: 'Match #4921 accepted — allocation confirmed',
-    timestamp: '1 hour ago',
-  },
-];
+import { getDashboard } from '../api/dashboard.js';
+import { emptyDashboard } from '../api/adapters/dashboard.js';
+import { showApiError } from '../api/notify.js';
 
 const URGENCY_COLORS = {
   danger: 'var(--color-danger)',
@@ -68,9 +32,26 @@ const URGENCY_COLORS = {
   success: 'var(--color-success)',
 };
 
-const RECENT_OFFERS = mockOffers.slice(0, 5);
+const STAT_ICONS = {
+  availableOrgans: IconHeart,
+  activeWaitlist: IconUsers,
+  pendingOffers: IconClipboardCheck,
+  transplantsThisMonth: IconActivity,
+};
 
 export default function DashboardPage() {
+  const [data, setData] = useState(() => emptyDashboard());
+
+  useEffect(() => {
+    let cancelled = false;
+    getDashboard()
+      .then((d) => !cancelled && setData(d))
+      .catch((err) => !cancelled && showApiError(err, 'Could not load the dashboard'));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const offerColumns = useMemo(
     () => [
       {
@@ -121,34 +102,9 @@ export default function DashboardPage() {
           gap: '20px',
         }}
       >
-        <StatCard
-          icon={IconHeart}
-          color="danger"
-          value={12}
-          label="Available Organs"
-          trend={3}
-        />
-        <StatCard
-          icon={IconUsers}
-          color="primary"
-          value={847}
-          label="Active Waitlist"
-          trend={12}
-        />
-        <StatCard
-          icon={IconClipboardCheck}
-          color="warning"
-          value={3}
-          label="Pending Offers"
-          trend={-2}
-        />
-        <StatCard
-          icon={IconActivity}
-          color="success"
-          value={28}
-          label="Transplants This Month"
-          trend={5}
-        />
+        {data.stats.map(({ key, ...stat }) => (
+          <StatCard key={key} icon={STAT_ICONS[key]} {...stat} />
+        ))}
       </div>
 
       <div
@@ -164,7 +120,7 @@ export default function DashboardPage() {
             Allocation Trends
           </Title>
           <ResponsiveContainer width="100%" height={280}>
-            <AreaChart data={ALLOCATION_TRENDS} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+            <AreaChart data={data.trend} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
               <defs>
                 <linearGradient id="allocationGradient" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="var(--color-primary)" stopOpacity={0.3} />
@@ -226,9 +182,12 @@ export default function DashboardPage() {
               flex: 1,
             }}
           >
-            {CRITICAL_ALERTS.map((alert) => (
+            {data.alerts.length === 0 ? (
+              <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 14 }}>No critical alerts</p>
+            ) : null}
+            {data.alerts.map((alert) => (
               <article
-                key={alert.message}
+                key={alert.key}
                 style={{
                   display: 'flex',
                   gap: 'var(--space-12)',
@@ -252,16 +211,14 @@ export default function DashboardPage() {
                   }}
                 />
                 <div style={{ minWidth: 0 }}>
-                  <p style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>{alert.message}</p>
-                  <p
-                    className="mono"
-                    style={{
-                      margin: 'var(--space-4) 0 0',
-                      fontSize: 12,
-                      color: 'var(--text-muted)',
-                    }}
-                  >
-                    {alert.timestamp}
+                  <p style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>
+                    {alert.link ? (
+                      <Link to={alert.link} style={{ color: 'inherit', textDecoration: 'none' }}>
+                        {alert.message}
+                      </Link>
+                    ) : (
+                      alert.message
+                    )}
                   </p>
                 </div>
               </article>
@@ -296,7 +253,7 @@ export default function DashboardPage() {
         </div>
         <DataTable
           columns={offerColumns}
-          data={RECENT_OFFERS}
+          data={data.offers}
           enablePagination={false}
           enableBottomToolbar={false}
           initialState={{ showGlobalFilter: false }}

@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { query } from '../db.js'
+import { ORGAN_TYPE_SQL } from '../util/settingsSql.js'
 
 const router = Router()
 
@@ -22,9 +23,7 @@ router.get('/', async (_req, res, next) => {
       query(
         'SELECT exclusion_reason_id AS id, code, description FROM exclusion_reason ORDER BY exclusion_reason_id',
       ),
-      query(`SELECT organ_type_id AS id, name, max_viability_hours, response_window_hours,
-                    priority_weight, min_weight_ratio, max_weight_ratio
-             FROM organ_type ORDER BY organ_type_id`),
+      query(`${ORGAN_TYPE_SQL} ORDER BY organ_type_id`),
       query('SELECT allele_id AS id, locus, allele_name FROM hla_allele ORDER BY allele_id'),
     ])
     res.json({

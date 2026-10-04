@@ -1,10 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Group, Loader, Select, Title } from '@mantine/core';
+import { Alert, Button, Group, Loader, Select, Title, Tooltip } from '@mantine/core';
+import { notifications } from '@mantine/notifications';
 import { IconHeartbeat } from '@tabler/icons-react';
 import DataTable from '../components/DataTable.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
 import ViabilityCountdown from '../components/ViabilityCountdown.jsx';
-import { listOrgans } from '../api/organs.js';
+import FormModal from '../components/FormModal.jsx';
+import { discardOrgan, listOrgans } from '../api/organs.js';
+import { getLookups } from '../api/lookups.js';
+import {
+  DISCARD_BLOCKED_TOOLTIP,
+  canDiscard,
+  defaultDiscardReasonId,
+  discardReasonOptions,
+} from '../api/adapters/organs.js';
 import { showApiError } from '../api/notify.js';
 
 const STATUS_OPTIONS = ['AVAILABLE', 'ALLOCATED', 'TRANSPLANTED', 'EXPIRED', 'DISCARDED'].map((s) => ({
@@ -15,6 +24,16 @@ const STATUS_OPTIONS = ['AVAILABLE', 'ALLOCATED', 'TRANSPLANTED', 'EXPIRED', 'DI
 // The clock only matters while an organ can still expire (the sweep expires AVAILABLE organs only).
 const SHOWS_COUNTDOWN = new Set(['AVAILABLE', 'EXPIRED']);
 
+// Mock mode has no lookups endpoint; same coded reasons as db/02_seed_reference.sql.
+const MOCK_DISCARD_REASONS = [
+  ['NO_SUITABLE_RECIPIENT', 'No compatible recipient identified'],
+  ['ALL_DECLINED', 'All ranked candidates declined the offer'],
+  ['VIABILITY_ELAPSED', 'Viability window elapsed before placement'],
+  ['QUALITY_ASSESSMENT', 'Failed quality assessment on inspection'],
+  ['TRANSPLANT_FAILED', 'Organ not used or transplant unsuccessful'],
+  ['TRANSPORT_FAILURE', 'Lost or damaged in transport'],
+].map(([code, description], i) => ({ id: i + 1, code, description }));
+
 const formatTime = (iso) =>
   iso ? new Date(iso).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '—';
 
@@ -23,6 +42,13 @@ export default function OrgansPage() {
   const [organs, setOrgans] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [reasons, setReasons] = useState([]);
+  const [discardTarget, setDiscardTarget] = useState(null);
+  const [reasonId, setReasonId] = useState(null);
+  const [reasonError, setReasonError] = useState(null);
+  const [submitError, setSubmitError] = useState(null);
+  const [discarding, setDiscarding] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -34,7 +60,46 @@ export default function OrgansPage() {
     return () => {
       cancelled = true;
     };
-  }, [filterStatus]);
+  }, [filterStatus, reloadKey]);
+
+  // Coded discard reasons (live lookups). Mock mode has no lookups, so it uses this fixed list.
+  useEffect(() => {
+    let cancelled = false;
+    getLookups()
+      .then((l) => !cancelled && setReasons(l ? l.discardReasons : MOCK_DISCARD_REASONS))
+      .catch((err) => !cancelled && showApiError(err, 'Could not load discard reasons'));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const openDiscard = (organ) => {
+    setDiscardTarget(organ);
+    setReasonId(defaultDiscardReasonId(organ, reasons));
+    setReasonError(null);
+    setSubmitError(null);
+  };
+  const closeDiscard = () => setDiscardTarget(null);
+
+  async function submitDiscard() {
+    if (!reasonId) {
+      setReasonError('Select a discard reason');
+      return;
+    }
+    setDiscarding(true);
+    setSubmitError(null);
+    try {
+      await discardOrgan(discardTarget, reasonId);
+      notifications.show({ title: 'Organ discarded', message: `${discardTarget.id} has been discarded`, color: 'orange' });
+      closeDiscard();
+    } catch (err) {
+      // Show the server's message in the modal and refresh: the organ may have changed state meanwhile.
+      setSubmitError(err?.message || 'Could not discard the organ');
+    } finally {
+      setDiscarding(false);
+      setReloadKey((k) => k + 1);
+    }
+  }
 
   const columns = useMemo(
     () => [
@@ -70,8 +135,29 @@ export default function OrgansPage() {
         Cell: ({ row }) =>
           row.original.hasActiveOffer ? <StatusBadge status="SENT" label="Active offer" /> : <span>—</span>,
       },
+      {
+        id: 'actions',
+        header: 'Actions',
+        size: 110,
+        enableSorting: false,
+        Cell: ({ row }) => {
+          const o = row.original;
+          if (!canDiscard(o)) return null;
+          const blocked = o.hasActiveOffer;
+          return (
+            <Tooltip label={DISCARD_BLOCKED_TOOLTIP} disabled={!blocked}>
+              <span>
+                <Button size="compact-sm" variant="light" color="red" disabled={blocked} onClick={() => openDiscard(o)}>
+                  Discard
+                </Button>
+              </span>
+            </Tooltip>
+          );
+        },
+      },
     ],
-    [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [reasons],
   );
 
   return (
@@ -98,6 +184,33 @@ export default function OrgansPage() {
         emptyIcon={IconHeartbeat}
         state={{ isLoading: loading && organs.length === 0 }}
       />
+      <FormModal
+        opened={discardTarget !== null}
+        onClose={closeDiscard}
+        title={discardTarget ? `Discard ${discardTarget.id}` : 'Discard organ'}
+        onSubmit={submitDiscard}
+        submitLabel="Discard organ"
+        loading={discarding}
+      >
+        {submitError && (
+          <Alert color="red" mb="md" title="Could not discard">
+            {submitError}
+          </Alert>
+        )}
+        <Select
+          label="Discard reason"
+          placeholder="Select a reason"
+          data={discardReasonOptions(reasons)}
+          value={reasonId}
+          onChange={(v) => {
+            setReasonId(v);
+            setReasonError(null);
+          }}
+          error={reasonError}
+          required
+          allowDeselect={false}
+        />
+      </FormModal>
     </div>
   );
 }

@@ -30,6 +30,13 @@ export function groupHla(hla = []) {
   return out;
 }
 
+// Same grouping, by allele id: { A: [1, 2], B: [...], DRB1: [...] } (pre-fills the edit form).
+export function groupHlaIds(hla = []) {
+  const out = Object.fromEntries(LOCI.map((l) => [l, []]));
+  for (const a of hla) (out[a.locus] ??= []).push(a.id);
+  return out;
+}
+
 // API Donor (schema-shaped) -> the row shape the registry already uses (mockDonors), plus the
 // split donorType/status (07 §7) and the HLA/organ detail. dateRegistered is not in the schema,
 // so it is null in live mode. List items have no `hla`/`organs`; detail items do.
@@ -41,6 +48,7 @@ export function adaptDonor(d) {
     name: d.name,
     dob: d.dateOfBirth,
     bloodGroup: d.bloodGroup,
+    bloodGroupId: d.bloodGroupId,
     age: calcAge(d.dateOfBirth),
     donorType: d.donorType,
     status: d.status,
@@ -55,6 +63,7 @@ export function adaptDonor(d) {
     height: d.heightCm,
     weight: d.weightKg,
     hlaByLocus,
+    hlaIdsByLocus: groupHlaIds(d.hla),
     hlaA: hlaByLocus.A.join(', '),
     hlaB: hlaByLocus.B.join(', '),
     hlaDR: hlaByLocus.DRB1.join(', '),

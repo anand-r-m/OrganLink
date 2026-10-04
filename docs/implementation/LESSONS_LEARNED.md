@@ -211,3 +211,95 @@ No failures or debugging cycles.
 - Postgres and `.env` were already in place; the script passed on the first run (about 1 s after reset, against a 30 s budget). No debugging cycles.
 - The match order is data-dependent: a same-hospital accept makes the transport DELIVERED immediately, so `depart` would 409. The script therefore tries donor/organ-type pairs until the top two candidates are at hospitals other than the recovering one. **Prevent:** do not hard-code ids in a smoke script; select fixtures from the API and assert the preconditions.
 - The script is re-runnable without a reset (each run procures a new organ), but the ticket requires `db:reset` first, and it consumes seeded waitlist entries, so reset before demos.
+
+## Phase 3 run: environment
+
+### New machine with no toolchain
+- **Symptom:** the Phase 3 run started on a Linux checkout with no Node, no Postgres, no `node_modules`, no `.env` and no sudo.
+- **Root cause:** earlier tasks ran on macOS with Homebrew Postgres. Nothing about the toolchain is in the repo.
+- **Fix:** user-local toolchain in the session scratchpad: the Node 24 LTS tarball, the Arch `postgresql`/`postgresql-libs` 18.6 packages extracted without installing (SHA-256 checked against the local pacman sync DB), and a static jq. Then a throwaway cluster that listens on TCP 5433 only (`unix_socket_directories = ''`, which avoids the socket-path-length problem), `.env` pointing at it, and `npm ci`. See `PHASE3_PROGRESS.md`.
+- **Prevent/detect:** the OL-033 README should list Node 20+, Postgres 14+, `jq` and `curl` as prerequisites, with a "start local test DB" snippet.
+
+## OL-020
+
+### Lint baseline mis-recorded by the orchestrator
+- **Symptom:** the implementer reported 9 lint warnings against a recorded baseline of 2.
+- **Root cause:** the baseline was read with `npx oxlint | tail -2`, which shows only the last two warnings, not a count.
+- **Fix:** re-counted. The baseline is 9, all in files OL-020 did not touch.
+- **Prevent/detect:** record lint baselines as a list of `file:line` locations (or oxlint's summary count), never a truncated tail.
+
+### Notes (no code failures)
+- `donor_hla` has no audit trigger, so an HLA-only PATCH would leave no audit row. The PATCH always issues an UPDATE (`name = name` when there are no scalar fields), so the donor's AFTER UPDATE audit trigger records the edit. The row marks that an edit happened; it does not detail which alleles changed.
+- The death-field rule is not pre-validated in the client or the API. The DB CHECK fires and its message is mapped onto the form field, which keeps a single source of truth (05 §3).
+
+## OL-021
+
+### Implementer interrupted by an API usage limit
+- **Symptom:** the implementer stopped after writing the server route and part of its tests.
+- **Root cause:** the account usage limit, not the code.
+- **Fix:** resumed the same agent (context intact) after the reset. It re-read its files and finished.
+- **Prevent/detect:** after any interrupted agent, diff from the task's base snapshot before resuming, so the state on disk is known.
+
+### Reviewer catch: mock-mode filtering discarded session rows
+- **Symptom (review):** after lifting the page to the API module, every filter change in mock mode re-read `mockRecipients`, so recipients added or edited in the session vanished.
+- **Root cause:** live mode re-queries the server on each filter change (correct), and the same effect ran unchanged in mock mode. The old page filtered page state in memory.
+- **Fix:** mock rows load once into state, and a pure `filterRecipients` filters them in memory. A client test covers it.
+- **Prevent/detect:** when a page gains live server-side filtering, keep mock filtering client-side over session state, and test "add locally, filter, clear, row still there".
+
+### Reviewer catch: unvalidated enum filter
+- **Symptom (review):** `?urgency=9` returned `[]` while bad `status`/`organ` returned 400.
+- **Fix:** validate every enum-valued query filter against its allowed codes.
+
+## OL-022
+
+### Notes (no failures)
+- First implementation cycle passed review and check.
+- Reviewer catch: the old mock priority tooltip showed a fabricated "Policy Bonus / Urgency Weight" split, which contradicts 08 §7 (urgency and waiting time only). It was replaced in both modes by one pure `priorityBreakdown()` helper.
+- The view's `priority_score` is a region-weighted mean of the two components, so the total does not equal their sum. The tooltip now says so. **Prevent:** when a UI shows components next to a total, check they reconcile visibly or label the weighting.
+- Checker gap: the checker killed its server before verifying the success path (POST 201). The orchestrator closed it with one curl. **Prevent:** checkers should run the happy path before the error paths.
+
+## OL-023
+
+### Notes (no failures)
+- First cycle passed review and check.
+- Reviewer catch: the mock `discardOrgan` checked the open offer before the status, so a terminal organ with an open offer gave different error codes in mock and live. **Prevent:** mock implementations of a guarded transition should check in the same order as the server route.
+- A17 (no discard with an open offer) has no DB rule. It is enforced in the API under the organ's `FOR UPDATE` lock, the same lock the offer-create route takes, so the check cannot race an offer insert.
+
+## OL-024
+
+### Reviewer catch: numeric overflow becomes 500
+- **Symptom (review):** `PATCH /api/regions/:id {"weights":{"hla":1000}}` returns 500 `INTERNAL`.
+- **Root cause:** `NUMERIC(5,2)` overflow raises SQLSTATE 22003, which `translatePgError` does not map. The contract maps only 22P02 and 23502 to `VALIDATION_ERROR`.
+- **Fix:** none in this task. Mapping 22003 changes the shared error table in `API_CONTRACT.md`, so it needs approval. It is recorded as a follow-up in PHASE3-REPORT. The UI cannot trigger it (sliders cap at 100).
+- **Prevent/detect:** for every NUMERIC(p,s) or INTEGER input, test one value above the column's precision. Decide once, contract-wide, how 22003 maps.
+
+### Notes
+- Settings writes touch shared reference rows (SR weights, Kidney). The server tests snapshot them in `before` and restore them in `after`, and the reviewer confirmed the restore. A leaked SR change would silently shift every later match test.
+
+## OL-025
+
+### `ON DELETE RESTRICT` raises 23001, not 23503
+- **Symptom:** deleting an HLA allele used by a donor returned 500 instead of the contract's 409 `REFERENCE_IN_USE`.
+- **Root cause:** the contract maps `REFERENCE_IN_USE` from "23503 on DELETE". `donor_hla` and `recipient_hla` use `ON DELETE RESTRICT`, which Postgres reports as SQLSTATE 23001 (restrict_violation). Only `NO ACTION` FKs report 23503.
+- **Fix:** `translatePgError` maps 23001 to 409 `REFERENCE_IN_USE`, with a unit case. The contract wording needs a team update (recorded in OL-025-REPORT and PHASE3-REPORT).
+- **Prevent/detect:** when mapping SQLSTATEs, check the FK's ON DELETE action. Test every DELETE endpoint against a referenced row.
+
+## OL-026
+
+### Notes (no failures)
+- First cycle passed review and check.
+- Reviewer catch: a "row counts per view" test asserted `count >= 0`, which can never fail. The orchestrator replaced it with "endpoint length equals the view's count, and the waiting-time view is non-empty on the seed". **Prevent:** every assertion should be able to fail. Compare against an independent query, not a bound that always holds.
+- The backlog said every report endpoint sweeps, but the contract index says only utilization and compliance do. The contract index was followed. **Prevent:** when the backlog and contract disagree on mechanics, follow the contract and note it in the report.
+- The v1 seed leaves most report views sparse (no declines, null fairness medians). Checkers ran `npm run smoke` once to compare the endpoints with the views on non-empty data too.
+
+## OL-027 / OL-028 (run in parallel)
+
+### Implementer claimed "build passes" after a change that broke it
+- **Symptom:** after a reviewer-requested fix, the OL-028 implementer reported "the build succeeds". The concurrent OL-027 implementer then found `npm run build` failing with `Identifier 'Tooltip' has already been declared` at `ReportsPage.jsx:2`. Lint also showed a new warning there.
+- **Root cause:** the fix imported Mantine's `Tooltip` into a page that already imports Recharts' `Tooltip`. `node --test` never loads `.jsx`, so the client suite stayed green. The build result in the hand-back was not genuine.
+- **Fix:** the orchestrator aliased the import (`Tooltip as MantineTooltip`). Build OK, lint back to 8, client 151/151.
+- **Prevent/detect:** never accept a self-reported build result. The independent checker re-runs the build, and the orchestrator re-runs it after any follow-up fix. Pages that import both Mantine and Recharts must alias one of the two `Tooltip` names.
+
+### Parallel implementers on a shared DB
+- OL-027 (server + dashboard) and OL-028 (client-only) ran at the same time, with disjoint files. OL-028 was barred from server tests and DB commands. It worked, and the build break above was caught precisely because the other agent ran the build.
+- OL-027 checker note: back-dating `sent_at` can violate `ck_offer_time_order`, because `sent_at` may not precede `created_at`. To test "offer close to expiry", rely on a short response window (Heart is 1 h) or back-date `created_at` too.

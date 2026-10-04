@@ -5,13 +5,21 @@ import { pool } from './db.js'
 import { errorHandler } from './errors.js'
 import { requireAuth } from './middleware/requireAuth.js'
 import authRouter from './routes/auth.js'
+import bloodCompatibilityRouter from './routes/bloodCompatibility.js'
+import dashboardRouter from './routes/dashboard.js'
 import donorsRouter from './routes/donors.js'
+import hlaAllelesRouter from './routes/hlaAlleles.js'
 import hospitalsRouter from './routes/hospitals.js'
 import lookupsRouter from './routes/lookups.js'
 import matchingRouter from './routes/matching.js'
 import offersRouter from './routes/offers.js'
+import organTypesRouter from './routes/organTypes.js'
 import organsRouter from './routes/organs.js'
+import recipientsRouter from './routes/recipients.js'
+import reportsRouter from './routes/reports.js'
+import regionsRouter from './routes/regions.js'
 import transplantsRouter from './routes/transplants.js'
+import waitlistRouter from './routes/waitlist.js'
 import transportRouter from './routes/transport.js'
 
 const PORT = Number(process.env.PORT) || 3001
@@ -49,14 +57,22 @@ app.get('/api/health', async (_req, res) => {
 // Every /api route mounted below this line needs a session (health and auth are above it).
 app.use('/api/auth', authRouter) // applies requireAuth itself, except for /login
 app.use('/api', requireAuth)
+app.use('/api/blood-compatibility', bloodCompatibilityRouter)
+app.use('/api/hla-alleles', hlaAllelesRouter)
+app.use('/api/dashboard', dashboardRouter)
 app.use('/api/donors', donorsRouter)
 app.use('/api/hospitals', hospitalsRouter)
 app.use('/api/lookups', lookupsRouter)
 app.use('/api/organs', organsRouter)
+app.use('/api/organ-types', organTypesRouter)
+app.use('/api/regions', regionsRouter)
 app.use('/api/matching', matchingRouter)
 app.use('/api/offers', offersRouter)
+app.use('/api/recipients', recipientsRouter)
+app.use('/api/reports', reportsRouter)
 app.use('/api/transport', transportRouter)
 app.use('/api/transplants', transplantsRouter)
+app.use('/api/waitlist', waitlistRouter)
 
 // Must stay after all routes.
 app.use(errorHandler)

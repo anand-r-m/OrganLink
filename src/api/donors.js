@@ -36,3 +36,17 @@ export async function procureOrgan(donor, { organTypeId, recoveringHospitalId, r
   });
   return adaptOrgan(organ);
 }
+
+// POST /api/donors: register a donor (body from formToDonorBody). Live mode only; mock mode keeps
+// its local-state behaviour in the page. Returns the adapted donor (with HLA and organs).
+export async function createDonor(body, live = USE_LIVE_API) {
+  if (!live) throw new Error('Registering donors through the API needs live mode');
+  return adaptDonor(await apiFetch('/donors', { method: 'POST', body }));
+}
+
+// PATCH /api/donors/:id: any subset of the donor fields; hlaAlleleIds replaces the HLA set.
+// Deactivate is updateDonor(donor, { status: 'INACTIVE' }).
+export async function updateDonor(donor, body, live = USE_LIVE_API) {
+  if (!live) throw new Error('Updating donors through the API needs live mode');
+  return adaptDonor(await apiFetch(`/donors/${donor.dbId}`, { method: 'PATCH', body }));
+}

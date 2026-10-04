@@ -11,6 +11,7 @@ import {
   MultiSelect,
   NumberInput,
   Loader,
+  Alert,
 } from '@mantine/core';
 import { DatePickerInput, DateTimePicker } from '@mantine/dates';
 import { useDisclosure } from '@mantine/hooks';
@@ -21,16 +22,29 @@ import FormModal from '../components/FormModal.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
 import ViabilityCountdown from '../components/ViabilityCountdown.jsx';
 import { USE_LIVE_API } from '../api/client.js';
-import { listDonors, getDonor, procureOrgan } from '../api/donors.js';
+import { listDonors, getDonor, procureOrgan, createDonor, updateDonor } from '../api/donors.js';
 import { listHospitals } from '../api/hospitals.js';
 import { getLookups } from '../api/lookups.js';
 import { showApiError } from '../api/notify.js';
 import { calcAge } from '../api/adapters/donors.js';
+import {
+  LOCI,
+  MAX_ALLELES_PER_LOCUS,
+  emptyDonorForm,
+  setDonorType,
+  donorToForm,
+  hlaOptionsFromLookups,
+  hlaOptionsFromMock,
+  validateDonorForm,
+  formToDonorBody,
+  serverErrorToForm,
+} from '../api/adapters/donorForm.js';
 import { mockHospitals } from '../data/mockHospitals.js';
+import { mockDonors } from '../data/mockDonors.js';
 
 const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
-const ORGAN_TYPES = ['Kidney', 'Liver', 'Heart', 'Lung', 'Pancreas'];
 const LOCUS_LABELS = { A: 'HLA-A', B: 'HLA-B', DRB1: 'HLA-DRB1' };
+const MOCK_HLA_OPTIONS = hlaOptionsFromMock(mockDonors);
 const TYPE_OPTIONS = [
   { value: 'LIVING', label: 'Living' },
   { value: 'DECEASED', label: 'Deceased' },
@@ -99,17 +113,13 @@ export default function DonorRegistryPage() {
   // Form state
   const [editingDonor, setEditingDonor] = useState(null);
   const [errors, setErrors] = useState({});
-  const [formName, setFormName] = useState('');
-  const [formDob, setFormDob] = useState(null);
-  const [formBlood, setFormBlood] = useState(null);
-  const [formHospital, setFormHospital] = useState(null);
+  const [form, setForm] = useState(emptyDonorForm);
   const [formRegion, setFormRegion] = useState('');
-  const [formOrganType, setFormOrganType] = useState([]);
-  const [formHlaA, setFormHlaA] = useState('');
-  const [formHlaB, setFormHlaB] = useState('');
-  const [formHlaDR, setFormHlaDR] = useState('');
-  const [formHeight, setFormHeight] = useState(null);
-  const [formWeight, setFormWeight] = useState(null);
+  const [formError, setFormError] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [bloodOptions, setBloodOptions] = useState(BLOOD_GROUPS);
+  const [hlaOptions, setHlaOptions] = useState(MOCK_HLA_OPTIONS);
+  const setField = (key, value) => setForm((f) => ({ ...f, [key]: value }));
 
   // Re-query whenever a filter changes: live mode sends it to the server as a query parameter.
   useEffect(() => {
@@ -149,8 +159,10 @@ export default function DonorRegistryPage() {
       .then((lk) => {
         if (cancelled || !lk) return;
         setOrganTypeOptions(lk.organTypes.map((t) => ({ value: String(t.id), label: t.name })));
+        setBloodOptions(lk.bloodGroups.map((g) => ({ value: String(g.id), label: g.name })));
+        setHlaOptions(hlaOptionsFromLookups(lk.hlaAlleles));
       })
-      .catch((err) => !cancelled && showApiError(err, 'Could not load organ types'));
+      .catch((err) => !cancelled && showApiError(err, 'Could not load reference lists'));
     return () => {
       cancelled = true;
     };
@@ -216,25 +228,6 @@ export default function DonorRegistryPage() {
     }
   }
 
-  const HLA_PATTERN = /^[A-Za-z]+\*\d{2}:\d{2}$/;
-
-  function validate() {
-    const e = {};
-    if (!formName || formName.trim().length < 2) e.name = 'Name is required';
-    if (!formDob) e.dob = 'Valid date of birth required';
-    else if (new Date(formDob) >= new Date()) e.dob = 'Valid date of birth required';
-    if (!formBlood) e.bloodGroup = 'Select blood group';
-    if (!formHospital) e.hospital = 'Select hospital';
-    if (!formOrganType || formOrganType.length === 0) e.organType = 'Select at least one organ type';
-    if (formHeight && (formHeight < 100 || formHeight > 220)) e.height = 'Height must be between 100–220 cm';
-    if (formWeight && (formWeight < 20 || formWeight > 200)) e.weight = 'Weight must be between 20–200 kg';
-    if (formHlaA && !HLA_PATTERN.test(formHlaA)) e.hlaA = 'Format should be like A*02:01';
-    if (formHlaB && !HLA_PATTERN.test(formHlaB)) e.hlaB = 'Format should be like B*07:02';
-    if (formHlaDR && !HLA_PATTERN.test(formHlaDR)) e.hlaDR = 'Format should be like DRB1*03:01';
-    setErrors(e);
-    return Object.keys(e).length === 0;
-  }
-
   const columns = useMemo(
     () => [
       {
@@ -277,17 +270,9 @@ export default function DonorRegistryPage() {
   );
 
   function resetForm() {
-    setFormName('');
-    setFormDob(null);
-    setFormBlood(null);
-    setFormHospital(null);
+    setForm(emptyDonorForm());
     setFormRegion('');
-    setFormOrganType([]);
-    setFormHlaA('');
-    setFormHlaB('');
-    setFormHlaDR('');
-    setFormHeight(null);
-    setFormWeight(null);
+    setFormError(null);
     setErrors({});
   }
 
@@ -298,63 +283,81 @@ export default function DonorRegistryPage() {
   }
 
   function openEditModal(donor) {
-    setFormName(donor.name || '');
-    setFormDob(donor.dob ? new Date(donor.dob) : null);
-    setFormBlood(donor.bloodGroup || null);
-    setFormHospital(donor.hospital || null);
+    setForm(donorToForm(donor, { live: USE_LIVE_API }));
     setFormRegion(donor.region || '');
-    setFormOrganType(
-      donor.organType
-        ? donor.organType.split(', ').map((o) => o.trim())
-        : [],
-    );
-    setFormHlaA(donor.hlaA || '');
-    setFormHlaB(donor.hlaB || '');
-    setFormHlaDR(donor.hlaDR || '');
-    setFormHeight(donor.height ?? null);
-    setFormWeight(donor.weight ?? null);
+    setFormError(null);
+    setErrors({});
     setEditingDonor(donor);
     drawerHandlers.close();
     registerHandlers.open();
   }
 
+  function closeFormModal() {
+    registerHandlers.close();
+    resetForm();
+    setEditingDonor(null);
+  }
+
   function handleHospitalChange(value) {
-    setFormHospital(value);
+    setField('hospital', value);
     const hospital = mockHospitals.find((h) => h.name === value);
     setFormRegion(hospital ? hospital.region : '');
   }
 
-  function handleSubmit() {
-    if (!validate()) return;
+  async function refreshList() {
+    setDonors(await listDonors({ type: filters.type, status: filters.status, hospital: filters.hospital }));
+  }
 
-    const organTypeStr = Array.isArray(formOrganType)
-      ? formOrganType.join(', ')
-      : formOrganType || '';
-
-    if (editingDonor) {
-      const updated = {
-        ...editingDonor,
-        name: formName,
-        bloodGroup: formBlood,
-        age: calcAge(formDob),
-        organType: organTypeStr,
-        organsLabel: organTypeStr || '0',
-        hospital: formHospital,
-        region: formRegion,
-        hlaA: formHlaA,
-        hlaB: formHlaB,
-        hlaDR: formHlaDR,
-        height: formHeight,
-        weight: formWeight,
-      };
-      setDonors((prev) =>
-        prev.map((d) => (d.id === editingDonor.id ? updated : d)),
-      );
+  // Live mode: POST/PATCH, then refresh the table and the drawer. A server error (e.g. the death-field
+  // CHECK) is shown in the form and the modal stays open.
+  async function submitLive() {
+    setSaving(true);
+    try {
+      const body = formToDonorBody(form);
+      const saved = editingDonor ? await updateDonor(editingDonor, body) : await createDonor(body);
       notifications.show({
-        title: 'Donor Updated',
-        message: 'Donor updated successfully',
-        color: 'blue',
+        title: editingDonor ? 'Donor Updated' : 'Donor Registered',
+        message: editingDonor ? `${saved.id} updated successfully` : `${saved.id} added successfully`,
+        color: editingDonor ? 'blue' : 'green',
       });
+      closeFormModal();
+      if (editingDonor) {
+        // The edit form replaced the drawer; reopen it on the saved donor.
+        setSelectedDonor(saved);
+        drawerHandlers.open();
+      }
+      await refreshList().catch((err) => showApiError(err, 'Could not refresh donors'));
+    } catch (err) {
+      const mapped = serverErrorToForm(err);
+      setFormError(mapped.message);
+      setErrors(mapped.fields);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function submitMock() {
+    const hlaByLocus = form.hla;
+    const hlaJoined = { hlaA: hlaByLocus.A.join(', '), hlaB: hlaByLocus.B.join(', '), hlaDR: hlaByLocus.DRB1.join(', ') };
+    const common = {
+      name: form.name,
+      bloodGroup: form.bloodGroup,
+      age: calcAge(form.dob),
+      hospital: form.hospital,
+      region: formRegion,
+      donorType: form.donorType,
+      status: form.status,
+      deathDate: form.donorType === 'DECEASED' && form.deathDate ? form.deathDate.toISOString() : null,
+      deathCause: form.donorType === 'DECEASED' ? form.deathCause.trim() || null : null,
+      hlaByLocus,
+      ...hlaJoined,
+      height: Number(form.height),
+      weight: Number(form.weight),
+    };
+    if (editingDonor) {
+      const updated = { ...editingDonor, ...common };
+      setDonors((prev) => prev.map((d) => (d.id === editingDonor.id ? updated : d)));
+      notifications.show({ title: 'Donor Updated', message: 'Donor updated successfully', color: 'blue' });
     } else {
       const maxIdNum = donors.reduce((max, d) => {
         const num = parseInt(d.id.replace('DNR-', ''), 10);
@@ -362,52 +365,50 @@ export default function DonorRegistryPage() {
       }, 1000);
       const newId = `DNR-${String(maxIdNum + 1).padStart(4, '0')}`;
       const newDonor = {
+        ...common,
         id: newId,
-        name: formName,
-        bloodGroup: formBlood,
-        age: calcAge(formDob),
-        organType: organTypeStr,
-        hospital: formHospital,
-        region: formRegion,
-        donorType: 'DECEASED',
-        status: 'ACTIVE',
+        organType: '',
         organCount: 0,
-        organsLabel: organTypeStr || '0',
-        hlaByLocus: { A: formHlaA ? [formHlaA] : [], B: formHlaB ? [formHlaB] : [], DRB1: formHlaDR ? [formHlaDR] : [] },
+        organsLabel: '0',
         hasDetail: true,
         organs: [],
         dateRegistered: todayISO(),
-        hlaA: formHlaA,
-        hlaB: formHlaB,
-        hlaDR: formHlaDR,
-        height: formHeight,
-        weight: formWeight,
       };
       setDonors((prev) => [newDonor, ...prev]);
-      notifications.show({
-        title: 'Donor Registered',
-        message: `${newId} added successfully`,
-        color: 'green',
-      });
+      notifications.show({ title: 'Donor Registered', message: `${newId} added successfully`, color: 'green' });
     }
-    registerHandlers.close();
-    resetForm();
-    setEditingDonor(null);
+    closeFormModal();
   }
 
-  function handleDeactivate() {
+  function handleSubmit() {
+    setFormError(null);
+    const e = validateDonorForm(form);
+    setErrors(e);
+    if (Object.keys(e).length) return;
+    if (USE_LIVE_API) submitLive();
+    else submitMock();
+  }
+
+  // Deactivate = PATCH { status: 'INACTIVE' } in live mode; the Type badge is untouched.
+  async function handleDeactivate() {
     if (!selectedDonor) return;
-    setDonors((prev) =>
-      prev.map((d) =>
-        d.id === selectedDonor.id ? { ...d, status: 'INACTIVE' } : d,
-      ),
-    );
-    notifications.show({
-      title: 'Donor Deactivated',
-      message: `${selectedDonor.id} has been deactivated`,
-      color: 'orange',
-    });
-    drawerHandlers.close();
+    if (!USE_LIVE_API) {
+      setDonors((prev) => prev.map((d) => (d.id === selectedDonor.id ? { ...d, status: 'INACTIVE' } : d)));
+      setSelectedDonor({ ...selectedDonor, status: 'INACTIVE' });
+      notifications.show({ title: 'Donor Deactivated', message: `${selectedDonor.id} has been deactivated`, color: 'orange' });
+      return;
+    }
+    setSaving(true);
+    try {
+      const saved = await updateDonor(selectedDonor, { status: 'INACTIVE' });
+      setSelectedDonor((cur) => (cur?.dbId === saved.dbId ? saved : cur));
+      notifications.show({ title: 'Donor Deactivated', message: `${saved.id} has been deactivated`, color: 'orange' });
+      await refreshList().catch((err) => showApiError(err, 'Could not refresh donors'));
+    } catch (err) {
+      showApiError(err, 'Could not deactivate donor');
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -419,13 +420,7 @@ export default function DonorRegistryPage() {
         style={{ marginBottom: 24 }}
       >
         <Title order={2}>Donor Registry</Title>
-        {/* Create/edit/deactivate stay local until OL-020, so live mode must not pretend to save. */}
-        <Button
-          leftSection={<IconUserPlus size={18} />}
-          onClick={openRegisterModal}
-          disabled={USE_LIVE_API}
-          title={USE_LIVE_API ? 'Donor registration is not live yet (OL-020)' : undefined}
-        >
+        <Button leftSection={<IconUserPlus size={18} />} onClick={openRegisterModal}>
           Register Donor
         </Button>
       </Group>
@@ -476,95 +471,116 @@ export default function DonorRegistryPage() {
       {/* Register / Edit Modal */}
       <FormModal
         opened={registerOpen}
-        onClose={() => {
-          registerHandlers.close();
-          resetForm();
-          setEditingDonor(null);
-        }}
+        onClose={closeFormModal}
         title={editingDonor ? 'Edit Donor' : 'Register Donor'}
         submitLabel={editingDonor ? 'Update' : 'Register'}
         onSubmit={handleSubmit}
+        loading={saving}
         size="md"
       >
         <Stack gap={16}>
+          {formError && (
+            <Alert color="red" variant="light" role="alert" aria-label="Form error">
+              {formError}
+            </Alert>
+          )}
           <TextInput
             label="Full Name"
             required
-            value={formName}
-            onChange={(e) => setFormName(e.currentTarget.value)}
+            value={form.name}
+            onChange={(e) => setField('name', e.currentTarget.value)}
             error={errors.name}
           />
           <DatePickerInput
             label="Date of Birth"
             required
-            value={formDob}
-            onChange={setFormDob}
+            value={form.dob}
+            onChange={(v) => setField('dob', v)}
             error={errors.dob}
           />
           <Select
             label="Blood Group"
-            data={BLOOD_GROUPS}
+            data={bloodOptions}
             required
-            value={formBlood}
-            onChange={setFormBlood}
+            value={form.bloodGroup}
+            onChange={(v) => setField('bloodGroup', v)}
             error={errors.bloodGroup}
           />
           <Select
             label="Hospital"
-            data={mockHospitals.map((h) => h.name)}
+            data={USE_LIVE_API ? hospitalOptions : mockHospitals.map((h) => h.name)}
             required
-            value={formHospital}
+            searchable
+            value={form.hospital}
             onChange={handleHospitalChange}
             error={errors.hospital}
           />
-          <TextInput
-            label="Region"
-            readOnly
-            value={formRegion}
-          />
-          <MultiSelect
-            label="Organ Type"
-            data={ORGAN_TYPES}
+          {!USE_LIVE_API && <TextInput label="Region" readOnly value={formRegion} />}
+          <Select
+            label="Donor Type"
+            data={TYPE_OPTIONS}
             required
-            value={formOrganType}
-            onChange={setFormOrganType}
-            error={errors.organType}
+            allowDeselect={false}
+            value={form.donorType}
+            onChange={(v) => v && setForm((f) => setDonorType(f, v))}
+            error={errors.donorType}
           />
-          <TextInput
-            label="HLA-A"
-            placeholder="e.g. A*02:01"
-            value={formHlaA}
-            onChange={(e) => setFormHlaA(e.currentTarget.value)}
-            error={errors.hlaA}
+          <Select
+            label="Status"
+            data={STATUS_OPTIONS}
+            required
+            allowDeselect={false}
+            value={form.status}
+            onChange={(v) => v && setField('status', v)}
+            error={errors.status}
           />
-          <TextInput
-            label="HLA-B"
-            placeholder="e.g. B*07:02"
-            value={formHlaB}
-            onChange={(e) => setFormHlaB(e.currentTarget.value)}
-            error={errors.hlaB}
-          />
-          <TextInput
-            label="HLA-DR"
-            placeholder="e.g. DRB1*03:01"
-            value={formHlaDR}
-            onChange={(e) => setFormHlaDR(e.currentTarget.value)}
-            error={errors.hlaDR}
-          />
+          {form.donorType === 'DECEASED' && (
+            <>
+              <DateTimePicker
+                label="Death Date"
+                required
+                value={form.deathDate}
+                onChange={(v) => setField('deathDate', v)}
+                error={errors.deathDate}
+              />
+              <TextInput
+                label="Cause of Death"
+                value={form.deathCause}
+                onChange={(e) => setField('deathCause', e.currentTarget.value)}
+                error={errors.deathCause}
+              />
+            </>
+          )}
+          {LOCI.map((locus) => (
+            <MultiSelect
+              key={locus}
+              label={LOCUS_LABELS[locus]}
+              placeholder={`Up to ${MAX_ALLELES_PER_LOCUS} alleles`}
+              data={hlaOptions[locus] ?? []}
+              maxValues={MAX_ALLELES_PER_LOCUS}
+              searchable
+              clearable
+              value={form.hla[locus]}
+              onChange={(v) => setForm((f) => ({ ...f, hla: { ...f.hla, [locus]: v } }))}
+              error={errors[`hla${locus}`]}
+            />
+          ))}
           <NumberInput
             label="Height (cm)"
+            required
             min={100}
             max={220}
-            value={formHeight}
-            onChange={setFormHeight}
+            value={form.height}
+            onChange={(v) => setField('height', v)}
             error={errors.height}
           />
           <NumberInput
             label="Weight (kg)"
+            required
             min={20}
             max={200}
-            value={formWeight}
-            onChange={setFormWeight}
+            value={form.weight}
+            onChange={(v) => setField('weight', v)}
             error={errors.weight}
           />
         </Stack>
@@ -708,7 +724,7 @@ export default function DonorRegistryPage() {
               <Button
                 variant="filled"
                 onClick={() => openEditModal(selectedDonor)}
-                disabled={USE_LIVE_API}
+                disabled={USE_LIVE_API && (detailLoading || !selectedDonor.hasDetail)}
               >
                 Edit
               </Button>
@@ -716,7 +732,8 @@ export default function DonorRegistryPage() {
                 variant="light"
                 color="red"
                 onClick={handleDeactivate}
-                disabled={USE_LIVE_API}
+                loading={saving}
+                disabled={selectedDonor.status === 'INACTIVE'}
               >
                 Deactivate
               </Button>
