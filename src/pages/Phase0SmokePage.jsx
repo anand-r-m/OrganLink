@@ -15,6 +15,16 @@ import { mockRecipients } from '../data/mockRecipients.js';
 import { mockRegions } from '../data/mockRegions.js';
 import { mockTransports } from '../data/mockTransports.js';
 
+const BADGE_STATES = [
+  'ACCEPTED', 'DELIVERED', 'TRANSPLANTED', 'ACTIVE',
+  'SENT', 'IN_TRANSIT', 'PENDING', '1B',
+  'DECLINED', 'FAILED', 'EXPIRED', '1A',
+  'CREATED', 'ALLOCATED', '2',
+  'VOIDED', 'CANCELLED', 'DISCARDED', 'SUSPENDED', 'INACTIVE',
+  // existing mock-style values
+  'Active', 'Sent', 'In Transit', 'Waiting',
+];
+
 export default function Phase0SmokePage() {
   const [opened, setOpened] = useState(false);
 
@@ -54,13 +64,10 @@ export default function Phase0SmokePage() {
         <StatCard icon={IconActivity} color="success" value={28} label="Transplants This Month" trend={5} />
       </SimpleGrid>
 
-      <div style={{ display: 'flex', gap: 12 }}>
-        <StatusBadge status="Active" />
-        <StatusBadge status="Sent" />
-        <StatusBadge status="Declined" />
-        <StatusBadge status="Created" />
-        <StatusBadge status="Expired" />
-        <StatusBadge status="1A" />
+      <div data-testid="badge-grid" style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+        {BADGE_STATES.map((state) => (
+          <StatusBadge key={state} status={state} />
+        ))}
       </div>
 
       <Button onClick={() => setOpened(true)}>Open modal</Button>

@@ -68,3 +68,11 @@
 ### Seed-dependent assumptions in later tasks
 - **Symptom (design note):** IDs are now deterministic after reset (Heart = organ 1, Liver = 2, Kidney = 3; AIIMS = hospital 1), but only because of `row_number()` ordering in the seed.
 - **Prevent/detect:** tests for later tasks should look rows up by name or type, not hard-code IDs.
+
+## OL-010
+
+No failures or debugging cycles.
+
+### Design note: keep badge logic out of the .jsx file
+- **Note:** `node --test` cannot import `.jsx`, so the status→colour map and label formatter live in `src/utils/status.js` (pure, unit-tested). `StatusBadge.jsx` re-exports them.
+- **Prevent/detect:** put testable logic in plain `.js` modules; the client test runner has no JSX transform. For a render check, use Vite's `ssrLoadModule` with `renderToStaticMarkup`.
