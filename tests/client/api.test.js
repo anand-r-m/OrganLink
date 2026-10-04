@@ -118,3 +118,81 @@ test('getLookups: null in mock mode; cached once in live mode; failures are not 
   assert.deepEqual(await getLookups(true), { bloodGroups: [1] })
   assert.equal(calls2.length, 1)
 })
+
+// ---- OL-011: donors API module and adapter ----
+import { listDonors, getDonor } from '../../src/api/donors.js'
+import { adaptDonor, adaptMockDonor, groupHla } from '../../src/api/adapters/donors.js'
+import { mockDonors } from '../../src/data/mockDonors.js'
+
+const apiDonor = {
+  id: 42, name: 'Rajesh Kumar', dateOfBirth: '1984-03-11', bloodGroupId: 4, bloodGroup: 'A+',
+  hospitalId: 1, hospitalName: 'AIIMS New Delhi', regionCode: 'NR', donorType: 'DECEASED', status: 'ACTIVE',
+  heightCm: 175, weightKg: 72, deathDate: '2026-10-04T03:10:00.000Z', deathCause: 'RTA', organCount: 1,
+}
+
+test('adaptDonor: display id, separate type and status, list row has no detail', () => {
+  const d = adaptDonor(apiDonor)
+  assert.equal(d.id, 'D-0042')
+  assert.equal(d.dbId, 42)
+  assert.equal(d.donorType, 'DECEASED')
+  assert.equal(d.status, 'ACTIVE')
+  assert.equal(d.hospital, 'AIIMS New Delhi')
+  assert.equal(d.region, 'NR')
+  assert.equal(d.organsLabel, '1')
+  assert.equal(d.hasDetail, false)
+  assert.deepEqual(d.organs, [])
+  assert.ok(d.age >= 40)
+})
+
+test('adaptDonor: detail groups the 6 HLA alleles by locus and adapts organs', () => {
+  const hla = [
+    { id: 1, locus: 'A', alleleName: 'A*01:01' }, { id: 2, locus: 'A', alleleName: 'A*02:01' },
+    { id: 3, locus: 'B', alleleName: 'B*07:02' }, { id: 4, locus: 'B', alleleName: 'B*08:01' },
+    { id: 5, locus: 'DRB1', alleleName: 'DRB1*03:01' }, { id: 6, locus: 'DRB1', alleleName: 'DRB1*15:01' },
+  ]
+  const d = adaptDonor({
+    ...apiDonor, hla,
+    organs: [{ id: 7, organType: 'Heart', status: 'AVAILABLE', maxViabilityHours: 6, hoursRemaining: 4.5,
+      recoveringHospitalName: 'AIIMS New Delhi', hasActiveOffer: false }],
+  })
+  assert.equal(d.hasDetail, true)
+  assert.deepEqual(d.hlaByLocus, { A: ['A*01:01', 'A*02:01'], B: ['B*07:02', 'B*08:01'], DRB1: ['DRB1*03:01', 'DRB1*15:01'] })
+  assert.equal(d.organs[0].id, 'O-0007')
+  assert.equal(d.organs[0].viabilityHours, 6)
+  assert.equal(d.organs[0].elapsedHours, 1.5)
+  assert.deepEqual(groupHla([]), { A: [], B: [], DRB1: [] })
+})
+
+test('adaptMockDonor splits the old conflated status into type and status', () => {
+  const deceased = adaptMockDonor(mockDonors.find((m) => m.status === 'Deceased'))
+  assert.equal(deceased.donorType, 'DECEASED')
+  assert.equal(deceased.status, 'ACTIVE')
+  const inactive = mockDonors.find((m) => m.status === 'Inactive')
+  if (inactive) assert.equal(adaptMockDonor(inactive).status, 'INACTIVE')
+  assert.ok(adaptMockDonor(mockDonors[0]).organs.length >= 1)
+})
+
+test('listDonors mock mode returns adapted mock rows and filters client-side', async () => {
+  const calls = stubFetch(200, [])
+  const all = await listDonors(undefined, false)
+  assert.equal(all.length, mockDonors.length)
+  const deceased = await listDonors({ type: 'DECEASED' }, false)
+  assert.ok(deceased.length > 0 && deceased.every((d) => d.donorType === 'DECEASED'))
+  assert.equal(calls.length, 0, 'mock mode must not call the API')
+})
+
+test('listDonors live mode puts the filters in the query string and adapts rows', async () => {
+  const calls = stubFetch(200, [apiDonor])
+  const rows = await listDonors({ type: 'DECEASED', status: null, hospital: '1' }, true)
+  assert.equal(calls[0].url, '/api/donors?type=DECEASED&hospital=1')
+  assert.equal(rows[0].id, 'D-0042')
+})
+
+test('getDonor live mode fetches /donors/:id; mock mode returns the row unchanged', async () => {
+  const calls = stubFetch(200, { ...apiDonor, hla: [], organs: [] })
+  const full = await getDonor({ dbId: 42 }, true)
+  assert.equal(calls[0].url, '/api/donors/42')
+  assert.equal(full.hasDetail, true)
+  const row = { dbId: null }
+  assert.equal(await getDonor(row, false), row)
+})

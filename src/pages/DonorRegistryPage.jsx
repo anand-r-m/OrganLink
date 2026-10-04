@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   Button,
   Title,
@@ -10,6 +10,7 @@ import {
   Select,
   MultiSelect,
   NumberInput,
+  Loader,
 } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
 import { useDisclosure } from '@mantine/hooks';
@@ -18,16 +19,29 @@ import { IconUserPlus } from '@tabler/icons-react';
 import DataTable from '../components/DataTable.jsx';
 import FormModal from '../components/FormModal.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
-import { mockDonors } from '../data/mockDonors.js';
+import ViabilityCountdown from '../components/ViabilityCountdown.jsx';
+import { USE_LIVE_API } from '../api/client.js';
+import { listDonors, getDonor } from '../api/donors.js';
+import { listHospitals } from '../api/hospitals.js';
+import { showApiError } from '../api/notify.js';
+import { calcAge } from '../api/adapters/donors.js';
 import { mockHospitals } from '../data/mockHospitals.js';
 
 const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 const ORGAN_TYPES = ['Kidney', 'Liver', 'Heart', 'Lung', 'Pancreas'];
-
-function calcAge(dob) {
-  if (!dob) return 0;
-  const diff = Date.now() - new Date(dob).getTime();
-  return Math.floor(diff / (365.25 * 24 * 60 * 60 * 1000));
+const LOCUS_LABELS = { A: 'HLA-A', B: 'HLA-B', DRB1: 'HLA-DRB1' };
+const TYPE_OPTIONS = [
+  { value: 'LIVING', label: 'Living' },
+  { value: 'DECEASED', label: 'Deceased' },
+];
+const STATUS_OPTIONS = [
+  { value: 'ACTIVE', label: 'Active' },
+  { value: 'INACTIVE', label: 'Inactive' },
+];
+// Donor type badge (07 §7): separate from the Active/Inactive status badge.
+const TYPE_VARIANT = { DECEASED: 'primary', LIVING: 'info' };
+function TypeBadge({ type }) {
+  return <StatusBadge status={type} variant={TYPE_VARIANT[type] ?? 'muted'} />;
 }
 
 function todayISO() {
@@ -63,7 +77,11 @@ const fieldLabelStyle = {
 };
 
 export default function DonorRegistryPage() {
-  const [donors, setDonors] = useState(mockDonors);
+  const [donors, setDonors] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filters, setFilters] = useState({ type: null, status: null, hospital: null });
+  const [hospitalOptions, setHospitalOptions] = useState([]);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [registerOpen, registerHandlers] = useDisclosure(false);
   const [selectedDonor, setSelectedDonor] = useState(null);
   const [drawerOpen, drawerHandlers] = useDisclosure(false);
@@ -82,6 +100,50 @@ export default function DonorRegistryPage() {
   const [formHlaDR, setFormHlaDR] = useState('');
   const [formHeight, setFormHeight] = useState(null);
   const [formWeight, setFormWeight] = useState(null);
+
+  // Re-query whenever a filter changes: live mode sends it to the server as a query parameter.
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    listDonors({
+      type: filters.type,
+      status: filters.status,
+      hospital: filters.hospital,
+    })
+      .then((rows) => !cancelled && setDonors(rows))
+      .catch((err) => !cancelled && showApiError(err, 'Could not load donors'))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [filters]);
+
+  useEffect(() => {
+    let cancelled = false;
+    listHospitals()
+      .then((rows) => {
+        if (cancelled) return;
+        setHospitalOptions(
+          rows.map((h) => ({ value: USE_LIVE_API ? String(h.dbId) : h.name, label: h.name })),
+        );
+      })
+      .catch((err) => !cancelled && showApiError(err, 'Could not load hospitals'));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Row click: show the list row at once, then load the full detail (HLA + organs) in live mode.
+  function openDrawer(row) {
+    setSelectedDonor(row);
+    drawerHandlers.open();
+    if (!USE_LIVE_API) return;
+    setDetailLoading(true);
+    getDonor(row)
+      .then((full) => setSelectedDonor((cur) => (cur?.dbId === full.dbId ? full : cur)))
+      .catch((err) => showApiError(err, 'Could not load donor'))
+      .finally(() => setDetailLoading(false));
+  }
 
   const HLA_PATTERN = /^[A-Za-z]+\*\d{2}:\d{2}$/;
 
@@ -118,9 +180,15 @@ export default function DonorRegistryPage() {
         Cell: ({ cell }) => <span className="mono">{cell.getValue()}</span>,
       },
       { accessorKey: 'age', header: 'Age', size: 60 },
-      { accessorKey: 'organType', header: 'Organ Type', size: 120 },
+      { accessorKey: 'organsLabel', header: 'Organs', size: 100 },
       { accessorKey: 'hospital', header: 'Hospital', size: 200, Cell: ({ cell }) => <span className="cell-truncate">{cell.getValue()}</span> },
       { accessorKey: 'region', header: 'Region', size: 120 },
+      {
+        accessorKey: 'donorType',
+        header: 'Type',
+        size: 100,
+        Cell: ({ cell }) => <TypeBadge type={cell.getValue()} />,
+      },
       {
         accessorKey: 'status',
         header: 'Status',
@@ -131,7 +199,7 @@ export default function DonorRegistryPage() {
         accessorKey: 'dateRegistered',
         header: 'Date Registered',
         size: 140,
-        Cell: ({ cell }) => <span className="mono">{cell.getValue()}</span>,
+        Cell: ({ cell }) => <span className="mono">{cell.getValue() ?? '—'}</span>,
       },
     ],
     [],
@@ -199,6 +267,7 @@ export default function DonorRegistryPage() {
         bloodGroup: formBlood,
         age: calcAge(formDob),
         organType: organTypeStr,
+        organsLabel: organTypeStr || '0',
         hospital: formHospital,
         region: formRegion,
         hlaA: formHlaA,
@@ -229,7 +298,13 @@ export default function DonorRegistryPage() {
         organType: organTypeStr,
         hospital: formHospital,
         region: formRegion,
-        status: 'Active',
+        donorType: 'DECEASED',
+        status: 'ACTIVE',
+        organCount: 0,
+        organsLabel: organTypeStr || '0',
+        hlaByLocus: { A: formHlaA ? [formHlaA] : [], B: formHlaB ? [formHlaB] : [], DRB1: formHlaDR ? [formHlaDR] : [] },
+        hasDetail: true,
+        organs: [],
         dateRegistered: todayISO(),
         hlaA: formHlaA,
         hlaB: formHlaB,
@@ -253,7 +328,7 @@ export default function DonorRegistryPage() {
     if (!selectedDonor) return;
     setDonors((prev) =>
       prev.map((d) =>
-        d.id === selectedDonor.id ? { ...d, status: 'Inactive' } : d,
+        d.id === selectedDonor.id ? { ...d, status: 'INACTIVE' } : d,
       ),
     );
     notifications.show({
@@ -273,12 +348,47 @@ export default function DonorRegistryPage() {
         style={{ marginBottom: 24 }}
       >
         <Title order={2}>Donor Registry</Title>
+        {/* Create/edit/deactivate stay local until OL-020, so live mode must not pretend to save. */}
         <Button
           leftSection={<IconUserPlus size={18} />}
           onClick={openRegisterModal}
+          disabled={USE_LIVE_API}
+          title={USE_LIVE_API ? 'Donor registration is not live yet (OL-020)' : undefined}
         >
           Register Donor
         </Button>
+      </Group>
+
+      <Group gap={12} align="flex-end" style={{ marginBottom: 16 }} aria-label="Donor filters">
+        <Select
+          label="Type"
+          placeholder="All types"
+          data={TYPE_OPTIONS}
+          clearable
+          value={filters.type}
+          onChange={(v) => setFilters((f) => ({ ...f, type: v }))}
+          w={160}
+        />
+        <Select
+          label="Status"
+          placeholder="All statuses"
+          data={STATUS_OPTIONS}
+          clearable
+          value={filters.status}
+          onChange={(v) => setFilters((f) => ({ ...f, status: v }))}
+          w={160}
+        />
+        <Select
+          label="Hospital"
+          placeholder="All hospitals"
+          data={hospitalOptions}
+          clearable
+          searchable
+          value={filters.hospital}
+          onChange={(v) => setFilters((f) => ({ ...f, hospital: v }))}
+          w={240}
+        />
+        {loading && <Loader size="sm" aria-label="Loading donors" />}
       </Group>
 
       {/* Data Table */}
@@ -287,10 +397,7 @@ export default function DonorRegistryPage() {
         data={donors}
         emptyMessage="No donors registered"
         mantineTableBodyRowProps={({ row }) => ({
-          onClick: () => {
-            setSelectedDonor(row.original);
-            drawerHandlers.open();
-          },
+          onClick: () => openDrawer(row.original),
           style: { cursor: 'pointer' },
         })}
       />
@@ -406,25 +513,24 @@ export default function DonorRegistryPage() {
           <Stack gap={16}>
             <Title order={3}>{selectedDonor.name}</Title>
             <span className="mono">{selectedDonor.id}</span>
-            <StatusBadge status={selectedDonor.status} />
+            <Group gap={8}>
+              <TypeBadge type={selectedDonor.donorType} />
+              <StatusBadge status={selectedDonor.status} />
+            </Group>
 
             <div style={sectionLabelStyle}>Medical Data</div>
             <div style={fieldRowStyle}>
               <span style={fieldLabelStyle}>Blood Group</span>
               <span className="mono">{selectedDonor.bloodGroup}</span>
             </div>
-            <div style={fieldRowStyle}>
-              <span style={fieldLabelStyle}>HLA-A</span>
-              <span className="mono">{selectedDonor.hlaA}</span>
-            </div>
-            <div style={fieldRowStyle}>
-              <span style={fieldLabelStyle}>HLA-B</span>
-              <span className="mono">{selectedDonor.hlaB}</span>
-            </div>
-            <div style={fieldRowStyle}>
-              <span style={fieldLabelStyle}>HLA-DR</span>
-              <span className="mono">{selectedDonor.hlaDR}</span>
-            </div>
+            {Object.entries(LOCUS_LABELS).map(([locus, label]) => (
+              <div key={locus} style={fieldRowStyle}>
+                <span style={fieldLabelStyle}>{label}</span>
+                <span className="mono">
+                  {selectedDonor.hlaByLocus?.[locus]?.join(', ') || (detailLoading ? '…' : '—')}
+                </span>
+              </div>
+            ))}
 
             <div style={sectionLabelStyle}>Body Metrics</div>
             <div style={fieldRowStyle}>
@@ -452,18 +558,35 @@ export default function DonorRegistryPage() {
               <span>{selectedDonor.region}</span>
             </div>
             <div style={fieldRowStyle}>
-              <span style={fieldLabelStyle}>Organ Type</span>
-              <span>{selectedDonor.organType}</span>
-            </div>
-            <div style={fieldRowStyle}>
               <span style={fieldLabelStyle}>Date</span>
-              <span className="mono">{selectedDonor.dateRegistered}</span>
+              <span className="mono">{selectedDonor.dateRegistered ?? '—'}</span>
             </div>
+
+            <div style={sectionLabelStyle}>Organs</div>
+            {detailLoading && <Loader size="sm" aria-label="Loading organs" />}
+            {!detailLoading && selectedDonor.organs.length === 0 && (
+              <Text size="sm" c="dimmed">No organs procured</Text>
+            )}
+            {selectedDonor.organs.map((o) => (
+              <Stack key={o.id} gap={4} aria-label={`Organ ${o.organType}`}>
+                <Group justify="space-between">
+                  <span>
+                    <span className="mono">{o.dbId ? `${o.id} ` : ''}</span>
+                    {o.organType}
+                  </span>
+                  {o.status && <StatusBadge status={o.status} />}
+                </Group>
+                {o.status === 'AVAILABLE' && (
+                  <ViabilityCountdown viabilityHours={o.viabilityHours} elapsedHours={o.elapsedHours} />
+                )}
+              </Stack>
+            ))}
 
             <Group gap={12} style={{ marginTop: 24 }}>
               <Button
                 variant="filled"
                 onClick={() => openEditModal(selectedDonor)}
+                disabled={USE_LIVE_API}
               >
                 Edit
               </Button>
@@ -471,6 +594,7 @@ export default function DonorRegistryPage() {
                 variant="light"
                 color="red"
                 onClick={handleDeactivate}
+                disabled={USE_LIVE_API}
               >
                 Deactivate
               </Button>

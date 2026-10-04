@@ -76,3 +76,32 @@ No failures or debugging cycles.
 ### Design note: keep badge logic out of the .jsx file
 - **Note:** `node --test` cannot import `.jsx`, so the status→colour map and label formatter live in `src/utils/status.js` (pure, unit-tested). `StatusBadge.jsx` re-exports them.
 - **Prevent/detect:** put testable logic in plain `.js` modules; the client test runner has no JSX transform. For a render check, use Vite's `ssrLoadModule` with `renderToStaticMarkup`.
+
+## OL-011
+
+### No Postgres running at task start (third time)
+- **Symptom:** `pg_isready` showed nothing on 5432 or 5433.
+- **Root cause:** the earlier throwaway clusters were stopped; no persistent server.
+- **Fix:** new throwaway cluster in the session scratchpad on :5433 (`-k /tmp/ol11sock`), `DATABASE_URL` via the environment only, then `db:reset --yes`.
+- **Prevent/detect:** the README "start local test DB" snippet (OL-033) would remove this repeated setup.
+
+### Guessed a column name instead of reading the schema
+- **Symptom:** every donor query returned 500; the server log said `column bg.name does not exist`.
+- **Root cause:** `blood_group` has `group_name`, not `name`. I wrote the SQL from memory.
+- **Fix:** `bg.group_name`.
+- **Prevent/detect:** grep `CREATE TABLE <t>` in `db/01_schema.sql` before writing a join. The 500 surfaced on the first test run; tests that hit the real DB catch this immediately.
+
+### Shell chain skipped an `export`
+- **Symptom:** the next test run failed with `ECONNREFUSED` after a BSD `sed -i` (no `''`) error.
+- **Root cause:** `sed … && … ; export DATABASE_URL=…` — the failed `sed` short-circuited the `&&` chain, and the `export` was part of it, so `DATABASE_URL` was unset.
+- **Fix:** rerun with `sed -i ''` and the export in its own statement.
+- **Prevent/detect:** use `sed -i ''` on macOS and keep `export` on its own line, not inside an `&&` chain.
+
+### SSR smoke check: "MantineProvider was not found"
+- **Symptom:** rendering the page through Vite `ssrLoadModule` failed even though it was wrapped in `MantineProvider`.
+- **Root cause:** Vite externalised `@mantine/*`, so the page and the test script loaded two copies of Mantine with separate contexts.
+- **Fix:** `ssr: { noExternal: [/mantine/, /tabler/] }` in the throwaway script.
+- **Prevent/detect:** use `noExternal` for context-based UI libraries in SSR smoke checks.
+
+### Design note: register/edit/deactivate disabled in live mode
+- **Note:** the donor create/edit/deactivate handlers only change local state (OL-020 makes them live). In live mode the buttons are disabled so the UI cannot show a save that never reached the database.

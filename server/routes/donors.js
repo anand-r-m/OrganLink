@@ -1,0 +1,95 @@
+import { Router } from 'express'
+import { pool, query } from '../db.js'
+import { ApiError } from '../errors.js'
+
+const router = Router()
+
+const DONOR_SQL = `
+  SELECT d.donor_id AS id, d.name, to_char(d.date_of_birth, 'YYYY-MM-DD') AS date_of_birth,
+         d.blood_group_id, bg.group_name AS blood_group,
+         d.hospital_id, h.name AS hospital_name, r.region_code,
+         d.donor_type, d.status, d.height_cm, d.weight_kg, d.death_date, d.death_cause,
+         (SELECT COUNT(*) FROM organ o WHERE o.donor_id = d.donor_id) AS organ_count
+  FROM donor d
+  JOIN blood_group bg USING (blood_group_id)
+  JOIN hospital h USING (hospital_id)
+  JOIN region r USING (region_id)`
+
+// OrganSummary: v_organ plus names and the open-offer indicator (API_CONTRACT "Organ").
+const ORGAN_SUMMARY_SQL = `
+  SELECT v.organ_id AS id, v.donor_id, d.name AS donor_name, bg.group_name AS donor_blood_group,
+         v.organ_type_id, v.organ_type_name AS organ_type,
+         v.recovering_hospital_id, h.name AS recovering_hospital_name, r.region_code,
+         v.recovered_at, v.max_viability_hours, v.expires_at, v.hours_remaining, v.is_expired,
+         v.status, v.discard_reason_id, dr.code AS discard_reason_code,
+         (ao.offer_id IS NOT NULL) AS has_active_offer, ao.offer_id AS active_offer_id
+  FROM v_organ v
+  JOIN donor d ON d.donor_id = v.donor_id
+  JOIN blood_group bg ON bg.blood_group_id = d.blood_group_id
+  JOIN hospital h ON h.hospital_id = v.recovering_hospital_id
+  JOIN region r ON r.region_id = h.region_id
+  LEFT JOIN discard_reason dr ON dr.discard_reason_id = v.discard_reason_id
+  LEFT JOIN LATERAL (
+    SELECT f.offer_id FROM organ_offer f
+    WHERE f.organ_id = v.organ_id AND f.status IN ('CREATED','SENT')
+    ORDER BY f.offer_id DESC LIMIT 1
+  ) ao ON TRUE
+  WHERE v.donor_id = $1
+  ORDER BY v.organ_id`
+
+const validationError = (field, message) =>
+  new ApiError(400, 'VALIDATION_ERROR', message, { fields: [field] })
+
+// GET /api/donors?status=&type=&hospital= (API_CONTRACT endpoint #6). No sweep.
+router.get('/', async (req, res, next) => {
+  try {
+    const { status, type, hospital } = req.query
+    const where = []
+    const params = []
+    if (status !== undefined) {
+      if (!['ACTIVE', 'INACTIVE'].includes(status)) throw validationError('status', 'status must be ACTIVE or INACTIVE')
+      params.push(status)
+      where.push(`d.status = $${params.length}`)
+    }
+    if (type !== undefined) {
+      if (!['LIVING', 'DECEASED'].includes(type)) throw validationError('type', 'type must be LIVING or DECEASED')
+      params.push(type)
+      where.push(`d.donor_type = $${params.length}`)
+    }
+    if (hospital !== undefined) {
+      if (!/^\d+$/.test(hospital)) throw validationError('hospital', 'hospital must be an integer id')
+      params.push(Number(hospital))
+      where.push(`d.hospital_id = $${params.length}`)
+    }
+    const sql = `${DONOR_SQL} ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY d.donor_id`
+    res.json(await query(sql, params))
+  } catch (err) {
+    next(err)
+  }
+})
+
+// GET /api/donors/:id (endpoint #8): donor + HLA + organs. Sweeps first so organ statuses are current.
+router.get('/:id', async (req, res, next) => {
+  try {
+    // Ids beyond BIGINT would raise 22003 in Postgres; treat anything unusable as not found.
+    const id = /^\d{1,15}$/.test(req.params.id) ? Number(req.params.id) : null
+    const notFound = new ApiError(404, 'DONOR_NOT_FOUND', `Donor ${req.params.id} not found`)
+    if (id === null) throw notFound
+    await pool.query('SELECT expire_stale_offers()')
+    const [donor] = await query(`${DONOR_SQL} WHERE d.donor_id = $1`, [id])
+    if (!donor) throw notFound
+    const hla = await query(
+      `SELECT a.allele_id AS id, a.locus, a.allele_name
+       FROM donor_hla dh JOIN hla_allele a USING (allele_id)
+       WHERE dh.donor_id = $1
+       ORDER BY CASE a.locus WHEN 'A' THEN 1 WHEN 'B' THEN 2 ELSE 3 END, a.allele_name`,
+      [id],
+    )
+    const organs = await query(ORGAN_SUMMARY_SQL, [id])
+    res.json({ ...donor, hla, organs })
+  } catch (err) {
+    next(err)
+  }
+})
+
+export default router
