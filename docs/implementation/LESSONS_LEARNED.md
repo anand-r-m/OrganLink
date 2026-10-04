@@ -125,3 +125,11 @@ No failures or debugging cycles.
 - **Root cause:** same as OL-011: the page loaded through Vite and the script's own imports used different module copies; sed-patching the script made it worse.
 - **Fix:** put the render in a temporary `.jsx` loaded via `ssrLoadModule`, so every import goes through Vite; delete both files afterwards.
 - **Prevent/detect:** keep one tiny `.jsx` entry for SSR smoke checks instead of building elements in the `.mjs`.
+
+## OL-013
+
+### No test or validation failures
+- Server (63), client (31) tests and the build passed on the first run.
+- Environment note: no Postgres was running. I started a throwaway PG 18 on port 5433 (`-k /tmp/ol13sock`, `LC_ALL=en_US.UTF-8` exported first), per the OL-012 lessons, and ran `db:reset --yes` against it. This worked first time.
+- Design note: the organ SQL moved from `donors.js` to `server/util/organSql.js` so `organs.js` and the donor drawer share one definition (OL-014 and OL-023 will add to `organs.js`).
+- Limit of the UI check: SSR does not run effects, so it proves the page and nav render but not table rows. Row rendering is covered by the adapter tests only; a browser check of `/organs` with the dev servers is still worth doing.

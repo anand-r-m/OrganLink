@@ -6,6 +6,7 @@ import DonorRegistryPage from './pages/DonorRegistryPage.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import MatchingConsolePage from './pages/MatchingConsolePage.jsx';
 import OfferWorkflowPage from './pages/OfferWorkflowPage.jsx';
+import OrgansPage from './pages/OrgansPage.jsx';
 import Phase0SmokePage from './pages/Phase0SmokePage.jsx';
 import RecipientWaitlistPage from './pages/RecipientWaitlistPage.jsx';
 import ReportsPage from './pages/ReportsPage.jsx';
@@ -24,6 +25,7 @@ export default function App() {
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/donors" element={<DonorRegistryPage />} />
         <Route path="/recipients" element={<RecipientWaitlistPage />} />
+        <Route path="/organs" element={<OrgansPage />} />
         <Route path="/matching" element={<MatchingConsolePage />} />
         <Route path="/offers" element={<OfferWorkflowPage />} />
         <Route path="/transport" element={<TransportPage />} />
