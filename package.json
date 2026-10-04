@@ -10,6 +10,7 @@
     "build": "vite build",
     "lint": "oxlint",
     "test:server": "node --test tests/server/*.test.js",
+    "test:client": "node --test tests/client/*.test.js",
     "preview": "vite preview",
     "db:reset": "bash scripts/db-reset.sh"
   },

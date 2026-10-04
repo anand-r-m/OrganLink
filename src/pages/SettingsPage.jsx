@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   Tabs,
   Title,
@@ -33,6 +33,9 @@ import DataTable from '../components/DataTable.jsx';
 import FormModal from '../components/FormModal.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
 import { mockHospitals } from '../data/mockHospitals.js';
+import { USE_LIVE_API } from '../api/client.js';
+import { listHospitals } from '../api/hospitals.js';
+import { showApiError } from '../api/notify.js';
 import { mockRegions } from '../data/mockRegions.js';
 import { mockCompatibility } from '../data/mockCompatibility.js';
 
@@ -56,7 +59,7 @@ const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
    Tab 1 — Hospitals
    ========================================================================== */
 
-function HospitalsTab({ hospitals, setHospitals }) {
+function HospitalsTab({ hospitals, setHospitals, loading = false }) {
   const [modalOpen, modalHandlers] = useDisclosure(false);
   const [editingHospital, setEditingHospital] = useState(null);
   const [errors, setErrors] = useState({});
@@ -176,7 +179,7 @@ function HospitalsTab({ hospitals, setHospitals }) {
         accessorKey: 'traumaLevel',
         header: 'Trauma Level',
         size: 120,
-        Cell: ({ cell }) => `Level ${cell.getValue()}`,
+        Cell: ({ cell }) => (cell.getValue() ? `Level ${cell.getValue()}` : '—'),
       },
       {
         accessorKey: 'status',
@@ -195,6 +198,7 @@ function HospitalsTab({ hospitals, setHospitals }) {
               <ActionIcon
                 variant="subtle"
                 color="gray"
+                disabled={USE_LIVE_API}
                 onClick={(e) => {
                   e.stopPropagation();
                   openEdit(row.original);
@@ -209,6 +213,7 @@ function HospitalsTab({ hospitals, setHospitals }) {
               <ActionIcon
                 variant="subtle"
                 color={row.original.status === 'active' ? 'red' : 'green'}
+                disabled={USE_LIVE_API}
                 onClick={(e) => {
                   e.stopPropagation();
                   toggleStatus(row.original);
@@ -232,18 +237,22 @@ function HospitalsTab({ hospitals, setHospitals }) {
   return (
     <Stack gap={16}>
       <Group justify="flex-end" mb={12}>
-        <Button
-          leftSection={<IconPlus size={16} />}
-          onClick={openAdd}
-        >
-          Add Hospital
-        </Button>
+        <Tooltip label="Editing hospitals is not available in live mode yet" disabled={!USE_LIVE_API}>
+          <Button
+            leftSection={<IconPlus size={16} />}
+            onClick={openAdd}
+            disabled={USE_LIVE_API}
+          >
+            Add Hospital
+          </Button>
+        </Tooltip>
       </Group>
 
       <DataTable
         columns={columns}
         data={hospitals}
         emptyMessage="No hospitals found"
+        state={{ isLoading: loading }}
       />
 
       <FormModal
@@ -995,7 +1004,21 @@ function PolicyWeightsTab() {
    ========================================================================== */
 
 export default function SettingsPage() {
-  const [hospitals, setHospitals] = useState(mockHospitals);
+  // Mock mode starts with mockHospitals (unchanged); live mode loads from GET /api/hospitals.
+  const [hospitals, setHospitals] = useState(USE_LIVE_API ? [] : mockHospitals);
+  const [hospitalsLoading, setHospitalsLoading] = useState(USE_LIVE_API);
+
+  useEffect(() => {
+    if (!USE_LIVE_API) return undefined;
+    let cancelled = false;
+    listHospitals()
+      .then((rows) => !cancelled && setHospitals(rows))
+      .catch((err) => !cancelled && showApiError(err, 'Could not load hospitals'))
+      .finally(() => !cancelled && setHospitalsLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <section aria-label="Settings" className="page-fade-in">
@@ -1031,11 +1054,13 @@ export default function SettingsPage() {
           <HospitalsTab
             hospitals={hospitals}
             setHospitals={setHospitals}
+            loading={hospitalsLoading}
           />
         </Tabs.Panel>
 
         <Tabs.Panel value="regions">
-          <RegionsTab hospitals={hospitals} />
+          {/* Regions tab is not live yet (OL-024): keep it on mock data so its counts do not change. */}
+          <RegionsTab hospitals={USE_LIVE_API ? mockHospitals : hospitals} />
         </Tabs.Panel>
 
         <Tabs.Panel value="organs">
