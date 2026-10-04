@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { pool, query } from '../db.js'
 import { ApiError } from '../errors.js'
 import { toCamel } from '../util/case.js'
+import { listOrganRuns } from '../util/matchRunSql.js'
 import { ORGAN_WITH_WEIGHTS_SQL, organSql } from '../util/organSql.js'
 
 const router = Router()
@@ -51,6 +52,21 @@ router.get('/:id', async (req, res, next) => {
       ...rest,
       defaultWeights: { hla: hlaWeight, urgency: urgencyWeight, distance: distanceWeight, wait: waitWeight },
     })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// GET /api/organs/:id/runs (endpoint #21): saved match runs, newest first. Sweeps first.
+router.get('/:id/runs', async (req, res, next) => {
+  try {
+    const id = /^\d{1,15}$/.test(req.params.id) ? Number(req.params.id) : null
+    const notFound = new ApiError(404, 'ORGAN_NOT_FOUND', `Organ ${req.params.id} not found`)
+    if (id === null) throw notFound
+    await pool.query('SELECT expire_stale_offers()')
+    const organ = await pool.query('SELECT 1 FROM organ WHERE organ_id = $1', [id])
+    if (organ.rowCount === 0) throw notFound
+    res.json(await listOrganRuns(pool, id))
   } catch (err) {
     next(err)
   }

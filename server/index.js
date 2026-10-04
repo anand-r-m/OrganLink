@@ -8,6 +8,7 @@ import authRouter from './routes/auth.js'
 import donorsRouter from './routes/donors.js'
 import hospitalsRouter from './routes/hospitals.js'
 import lookupsRouter from './routes/lookups.js'
+import matchingRouter from './routes/matching.js'
 import organsRouter from './routes/organs.js'
 
 const PORT = Number(process.env.PORT) || 3001
@@ -49,6 +50,7 @@ app.use('/api/donors', donorsRouter)
 app.use('/api/hospitals', hospitalsRouter)
 app.use('/api/lookups', lookupsRouter)
 app.use('/api/organs', organsRouter)
+app.use('/api/matching', matchingRouter)
 
 // Must stay after all routes.
 app.use(errorHandler)

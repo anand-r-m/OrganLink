@@ -133,3 +133,17 @@ No failures or debugging cycles.
 - Environment note: no Postgres was running. I started a throwaway PG 18 on port 5433 (`-k /tmp/ol13sock`, `LC_ALL=en_US.UTF-8` exported first), per the OL-012 lessons, and ran `db:reset --yes` against it. This worked first time.
 - Design note: the organ SQL moved from `donors.js` to `server/util/organSql.js` so `organs.js` and the donor drawer share one definition (OL-014 and OL-023 will add to `organs.js`).
 - Limit of the UI check: SSR does not run effects, so it proves the page and nav render but not table rows. Row rendering is covered by the adapter tests only; a browser check of `/organs` with the dev servers is still worth doing.
+
+## OL-014
+
+### SSR smoke check failed with ERR_AMBIGUOUS_MODULE_SYNTAX (first attempt)
+- **Symptom:** the throwaway SSR script crashed; the first run's output was cut off by `tail`, so the cause was unclear, and I had already deleted the script.
+- **Root cause:** I again built elements in the `.mjs` (the OL-012 lesson) and then, on the retry, added `/react/` to `ssr.noExternal`, which inlined CJS React.
+- **Fix:** one `.jsx` entry that does the whole render through `ssrLoadModule`, with `noExternal: [/mantine/, /tabler/]` only.
+- **Prevent/detect:** keep the working SSR recipe in the README (OL-033); do not delete the smoke files until the run has succeeded.
+
+### Notes (no failures)
+- Server (72) and client (38) tests, lint (no new warnings) and build passed on the first run.
+- Environment: no Postgres was running. I started a throwaway PG 18 on port 5433 (`-k /tmp/ol14sock`, `LC_ALL=en_US.UTF-8`) and ran `db:reset --yes` against it.
+- The live-server curl check ran against the seeded DB, so match runs accumulated in it. Tests only assert relative counts (before/after) for that reason.
+- Design note: all-zero effective weights are rejected in the route before calling `match_candidates`. The effective weights include regional defaults, so `{hla:0}` alone is valid if the region has other non-zero weights.

@@ -1047,6 +1047,11 @@ h3 {
   transition: width 0.2s ease;
 }
 
+.weight-segment-wait {
+  background: var(--color-success);
+  transition: width 0.2s ease;
+}
+
 .filtered-out-accordion {
   margin-top: var(--space-8);
   border-radius: var(--radius-card);
