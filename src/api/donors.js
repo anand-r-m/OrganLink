@@ -1,5 +1,5 @@
 import { USE_LIVE_API, apiFetch } from './client.js';
-import { adaptDonor, adaptDonors, adaptMockDonor } from './adapters/donors.js';
+import { adaptDonor, adaptDonors, adaptMockDonor, adaptOrgan } from './adapters/donors.js';
 import { mockDonors } from '../data/mockDonors.js';
 
 // Filters the mock rows the way the server does, so the UI behaves the same in both modes.
@@ -24,4 +24,15 @@ export async function listDonors(params, live = USE_LIVE_API) {
 export async function getDonor(donor, live = USE_LIVE_API) {
   if (!live) return donor;
   return adaptDonor(await apiFetch(`/donors/${donor.dbId}`));
+}
+
+// POST /api/donors/:id/organs: procure an organ (starts the viability clock). Live mode only;
+// mock mode has no organ store, so the UI disables the action there. Returns the adapted organ.
+export async function procureOrgan(donor, { organTypeId, recoveringHospitalId, recoveredAt }, live = USE_LIVE_API) {
+  if (!live) throw new Error('Procure Organ is only available in live mode');
+  const organ = await apiFetch(`/donors/${donor.dbId}/organs`, {
+    method: 'POST',
+    body: { organTypeId, recoveringHospitalId, recoveredAt },
+  });
+  return adaptOrgan(organ);
 }

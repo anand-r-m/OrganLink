@@ -12,17 +12,18 @@ import {
   NumberInput,
   Loader,
 } from '@mantine/core';
-import { DatePickerInput } from '@mantine/dates';
+import { DatePickerInput, DateTimePicker } from '@mantine/dates';
 import { useDisclosure } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
-import { IconUserPlus } from '@tabler/icons-react';
+import { IconUserPlus, IconHeartPlus } from '@tabler/icons-react';
 import DataTable from '../components/DataTable.jsx';
 import FormModal from '../components/FormModal.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
 import ViabilityCountdown from '../components/ViabilityCountdown.jsx';
 import { USE_LIVE_API } from '../api/client.js';
-import { listDonors, getDonor } from '../api/donors.js';
+import { listDonors, getDonor, procureOrgan } from '../api/donors.js';
 import { listHospitals } from '../api/hospitals.js';
+import { getLookups } from '../api/lookups.js';
 import { showApiError } from '../api/notify.js';
 import { calcAge } from '../api/adapters/donors.js';
 import { mockHospitals } from '../data/mockHospitals.js';
@@ -86,6 +87,15 @@ export default function DonorRegistryPage() {
   const [selectedDonor, setSelectedDonor] = useState(null);
   const [drawerOpen, drawerHandlers] = useDisclosure(false);
 
+  // Procure Organ modal state (live mode only)
+  const [procureOpen, procureHandlers] = useDisclosure(false);
+  const [organTypeOptions, setOrganTypeOptions] = useState([]);
+  const [procType, setProcType] = useState(null);
+  const [procHospital, setProcHospital] = useState(null);
+  const [procRecoveredAt, setProcRecoveredAt] = useState(new Date());
+  const [procErrors, setProcErrors] = useState({});
+  const [procSaving, setProcSaving] = useState(false);
+
   // Form state
   const [editingDonor, setEditingDonor] = useState(null);
   const [errors, setErrors] = useState({});
@@ -133,6 +143,19 @@ export default function DonorRegistryPage() {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    getLookups()
+      .then((lk) => {
+        if (cancelled || !lk) return;
+        setOrganTypeOptions(lk.organTypes.map((t) => ({ value: String(t.id), label: t.name })));
+      })
+      .catch((err) => !cancelled && showApiError(err, 'Could not load organ types'));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Row click: show the list row at once, then load the full detail (HLA + organs) in live mode.
   function openDrawer(row) {
     setSelectedDonor(row);
@@ -143,6 +166,54 @@ export default function DonorRegistryPage() {
       .then((full) => setSelectedDonor((cur) => (cur?.dbId === full.dbId ? full : cur)))
       .catch((err) => showApiError(err, 'Could not load donor'))
       .finally(() => setDetailLoading(false));
+  }
+
+  function openProcureModal() {
+    setProcType(null);
+    setProcHospital(selectedDonor?.hospitalId != null ? String(selectedDonor.hospitalId) : null);
+    setProcRecoveredAt(new Date());
+    setProcErrors({});
+    procureHandlers.open();
+  }
+
+  async function handleProcure() {
+    const e = {};
+    if (!procType) e.organType = 'Select an organ type';
+    if (!procHospital) e.hospital = 'Select the recovering hospital';
+    if (!(procRecoveredAt instanceof Date) || Number.isNaN(procRecoveredAt.getTime())) {
+      e.recoveredAt = 'Recovery time is required';
+    } else if (procRecoveredAt.getTime() > Date.now()) {
+      e.recoveredAt = 'Recovery time cannot be in the future';
+    }
+    setProcErrors(e);
+    if (Object.keys(e).length) return;
+    setProcSaving(true);
+    try {
+      const organ = await procureOrgan(selectedDonor, {
+        organTypeId: Number(procType),
+        recoveringHospitalId: Number(procHospital),
+        recoveredAt: procRecoveredAt.toISOString(),
+      });
+      notifications.show({
+        title: 'Organ Procured',
+        message: `${organ.id} ${organ.organType} is now available`,
+        color: 'green',
+      });
+      procureHandlers.close();
+      // Refresh the drawer's organ list from the server, and the registry's organ counts.
+      const [full, rows] = await Promise.all([
+        getDonor(selectedDonor),
+        listDonors({ type: filters.type, status: filters.status, hospital: filters.hospital }),
+      ]);
+      setSelectedDonor((cur) => (cur?.dbId === full.dbId ? full : cur));
+      setDonors(rows);
+    } catch (err) {
+      // Server rule messages (e.g. ck_organ_not_future) are shown inside the modal.
+      if (err?.code === 'CONSTRAINT_VIOLATION') setProcErrors({ recoveredAt: err.message });
+      else showApiError(err, 'Could not procure organ');
+    } finally {
+      setProcSaving(false);
+    }
   }
 
   const HLA_PATTERN = /^[A-Za-z]+\*\d{2}:\d{2}$/;
@@ -499,6 +570,45 @@ export default function DonorRegistryPage() {
         </Stack>
       </FormModal>
 
+      {/* Procure Organ modal (06 Stage 2) */}
+      <FormModal
+        opened={procureOpen}
+        onClose={procureHandlers.close}
+        title="Procure Organ"
+        submitLabel="Procure"
+        onSubmit={handleProcure}
+        loading={procSaving}
+        size="md"
+      >
+        <Stack gap={16}>
+          <Select
+            label="Organ Type"
+            required
+            data={organTypeOptions}
+            value={procType}
+            onChange={setProcType}
+            error={procErrors.organType}
+          />
+          <Select
+            label="Recovering Hospital"
+            required
+            searchable
+            data={hospitalOptions}
+            value={procHospital}
+            onChange={setProcHospital}
+            error={procErrors.hospital}
+          />
+          <DateTimePicker
+            label="Recovery Time"
+            required
+            value={procRecoveredAt}
+            onChange={setProcRecoveredAt}
+            maxDate={new Date()}
+            error={procErrors.recoveredAt}
+          />
+        </Stack>
+      </FormModal>
+
       {/* Detail Drawer */}
       <Drawer
         opened={drawerOpen}
@@ -562,7 +672,19 @@ export default function DonorRegistryPage() {
               <span className="mono">{selectedDonor.dateRegistered ?? '—'}</span>
             </div>
 
-            <div style={sectionLabelStyle}>Organs</div>
+            <Group justify="space-between" style={sectionLabelStyle}>
+              <span>Organs</span>
+              <Button
+                size="compact-sm"
+                variant="light"
+                leftSection={<IconHeartPlus size={14} />}
+                onClick={openProcureModal}
+                disabled={!USE_LIVE_API}
+                title={USE_LIVE_API ? undefined : 'Procure Organ needs live mode'}
+              >
+                Procure Organ
+              </Button>
+            </Group>
             {detailLoading && <Loader size="sm" aria-label="Loading organs" />}
             {!detailLoading && selectedDonor.organs.length === 0 && (
               <Text size="sm" c="dimmed">No organs procured</Text>

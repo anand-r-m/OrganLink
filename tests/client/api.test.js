@@ -196,3 +196,19 @@ test('getDonor live mode fetches /donors/:id; mock mode returns the row unchange
   const row = { dbId: null }
   assert.equal(await getDonor(row, false), row)
 })
+
+test('procureOrgan POSTs the body to the donor and adapts the organ; refuses in mock mode', async () => {
+  const { procureOrgan } = await import('../../src/api/donors.js')
+  const calls = stubFetch(201, {
+    id: 9, donorId: 3, organType: 'Kidney', status: 'AVAILABLE', recoveringHospitalName: 'AIIMS',
+    recoveredAt: 'x', expiresAt: 'y', maxViabilityHours: 30, hoursRemaining: 29, hasActiveOffer: false,
+  })
+  const body = { organTypeId: 4, recoveringHospitalId: 1, recoveredAt: '2026-10-04T10:00:00.000Z' }
+  const organ = await procureOrgan({ dbId: 3 }, body, true)
+  assert.equal(calls[0].url, '/api/donors/3/organs')
+  assert.equal(calls[0].init.method, 'POST')
+  assert.deepEqual(JSON.parse(calls[0].init.body), body)
+  assert.equal(organ.id, 'O-0009')
+  assert.equal(organ.elapsedHours, 1)
+  await assert.rejects(() => procureOrgan({ dbId: null }, body, false), /live mode/)
+})

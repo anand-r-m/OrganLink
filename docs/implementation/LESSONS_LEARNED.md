@@ -105,3 +105,23 @@ No failures or debugging cycles.
 
 ### Design note: register/edit/deactivate disabled in live mode
 - **Note:** the donor create/edit/deactivate handlers only change local state (OL-020 makes them live). In live mode the buttons are disabled so the UI cannot show a save that never reached the database.
+
+## OL-012
+
+### Throwaway Postgres failed to start twice
+- **Symptom:** `pg_ctl start` reported "could not start server"; `db:reset` then got ECONNREFUSED.
+- **Root cause:** (1) the scratchpad socket directory path exceeds the 103-byte Unix-socket limit; (2) with no `LC_ALL` set, Postgres 18 aborted with "postmaster became multithreaded during startup".
+- **Fix:** socket dir `-k /tmp/ol12sock`, and `LC_ALL=en_US.UTF-8` exported before `pg_ctl`.
+- **Prevent/detect:** read `pg.log` right after a failed start. The README "start local test DB" snippet (OL-033) should include both settings.
+
+### New test file broke existing exact-count tests
+- **Symptom:** `donors-read` tests failed intermittently (`10 !== 11` donors; donor 1 organ count changed) once `donors-procure.test.js` existed.
+- **Root cause:** `node --test` runs files in parallel against one DB; my file inserted a donor/organs that other files count exactly.
+- **Fix:** `test:server` now runs with `--test-concurrency=1`. My tests also use their own donor and count rows per donor, not globally.
+- **Prevent/detect:** server tests share one DB, so never assert global counts in parallel-run files; keep concurrency at 1 for DB suites.
+
+### SSR smoke script: two module graphs again
+- **Symptom:** "MantineProvider was not found" / `ERR_AMBIGUOUS_MODULE_SYNTAX` from a throwaway `.mjs` that imported react and mantine natively.
+- **Root cause:** same as OL-011: the page loaded through Vite and the script's own imports used different module copies; sed-patching the script made it worse.
+- **Fix:** put the render in a temporary `.jsx` loaded via `ssrLoadModule`, so every import goes through Vite; delete both files afterwards.
+- **Prevent/detect:** keep one tiny `.jsx` entry for SSR smoke checks instead of building elements in the `.mjs`.

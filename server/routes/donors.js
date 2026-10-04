@@ -1,6 +1,7 @@
 import { Router } from 'express'
-import { pool, query } from '../db.js'
+import { pool, query, withTx } from '../db.js'
 import { ApiError } from '../errors.js'
+import { toCamel } from '../util/case.js'
 
 const router = Router()
 
@@ -16,13 +17,13 @@ const DONOR_SQL = `
   JOIN region r USING (region_id)`
 
 // OrganSummary: v_organ plus names and the open-offer indicator (API_CONTRACT "Organ").
-const ORGAN_SUMMARY_SQL = `
+const organSql = (where, orderBy = '', extraSelect = '') => `
   SELECT v.organ_id AS id, v.donor_id, d.name AS donor_name, bg.group_name AS donor_blood_group,
          v.organ_type_id, v.organ_type_name AS organ_type,
          v.recovering_hospital_id, h.name AS recovering_hospital_name, r.region_code,
          v.recovered_at, v.max_viability_hours, v.expires_at, v.hours_remaining, v.is_expired,
          v.status, v.discard_reason_id, dr.code AS discard_reason_code,
-         (ao.offer_id IS NOT NULL) AS has_active_offer, ao.offer_id AS active_offer_id
+         (ao.offer_id IS NOT NULL) AS has_active_offer, ao.offer_id AS active_offer_id${extraSelect}
   FROM v_organ v
   JOIN donor d ON d.donor_id = v.donor_id
   JOIN blood_group bg ON bg.blood_group_id = d.blood_group_id
@@ -34,8 +35,17 @@ const ORGAN_SUMMARY_SQL = `
     WHERE f.organ_id = v.organ_id AND f.status IN ('CREATED','SENT')
     ORDER BY f.offer_id DESC LIMIT 1
   ) ao ON TRUE
-  WHERE v.donor_id = $1
-  ORDER BY v.organ_id`
+  WHERE ${where} ${orderBy}`
+
+const ORGAN_SUMMARY_SQL = organSql('v.donor_id = $1', 'ORDER BY v.organ_id')
+
+// Organ (with the region's default match weights) by organ id; used for the POST response.
+const ORGAN_WITH_WEIGHTS_SQL = organSql(
+  'v.organ_id = $1',
+  '',
+  `,
+         r.hla_weight, r.urgency_weight, r.distance_weight, r.wait_weight`,
+)
 
 const validationError = (field, message) =>
   new ApiError(400, 'VALIDATION_ERROR', message, { fields: [field] })
@@ -87,6 +97,52 @@ router.get('/:id', async (req, res, next) => {
     )
     const organs = await query(ORGAN_SUMMARY_SQL, [id])
     res.json({ ...donor, hla, organs })
+  } catch (err) {
+    next(err)
+  }
+})
+
+const isId = (v) => Number.isSafeInteger(v) && v > 0
+
+// POST /api/donors/:id/organs (endpoint #10): procure an organ, starting its viability clock.
+// Sweep first so organ statuses are current. The future-timestamp rule is the DB's
+// (ck_organ_not_future), translated to 400 CONSTRAINT_VIOLATION.
+router.post('/:id/organs', async (req, res, next) => {
+  try {
+    const donorId = /^\d{1,15}$/.test(req.params.id) ? Number(req.params.id) : null
+    const { organTypeId, recoveringHospitalId, recoveredAt } = req.body ?? {}
+    const bad = []
+    if (!isId(organTypeId)) bad.push('organTypeId')
+    if (!isId(recoveringHospitalId)) bad.push('recoveringHospitalId')
+    // Offset-bearing ISO 8601 only (contract); Date.parse alone would accept ambiguous local forms.
+    const hasOffset = typeof recoveredAt === 'string' && /(Z|[+-]\d{2}:?\d{2})$/i.test(recoveredAt)
+    if (!hasOffset || Number.isNaN(Date.parse(recoveredAt))) bad.push('recoveredAt')
+    if (bad.length) {
+      throw new ApiError(400, 'VALIDATION_ERROR', `Invalid or missing: ${bad.join(', ')}`, { fields: bad })
+    }
+    const notFound = new ApiError(404, 'DONOR_NOT_FOUND', `Donor ${req.params.id} not found`)
+    if (donorId === null) throw notFound
+
+    const organ = await withTx(
+      req.session.userId,
+      async (client) => {
+        const donor = await client.query('SELECT 1 FROM donor WHERE donor_id = $1', [donorId])
+        if (donor.rowCount === 0) throw notFound
+        const ins = await client.query(
+          `INSERT INTO organ (donor_id, organ_type_id, recovering_hospital_id, recovered_at)
+           VALUES ($1, $2, $3, $4) RETURNING organ_id`,
+          [donorId, organTypeId, recoveringHospitalId, recoveredAt],
+        )
+        const { rows } = await client.query(ORGAN_WITH_WEIGHTS_SQL, [ins.rows[0].organ_id])
+        return toCamel(rows[0])
+      },
+      { sweep: true },
+    )
+    const { hlaWeight, urgencyWeight, distanceWeight, waitWeight, ...rest } = organ
+    res.status(201).json({
+      ...rest,
+      defaultWeights: { hla: hlaWeight, urgency: urgencyWeight, distance: distanceWeight, wait: waitWeight },
+    })
   } catch (err) {
     next(err)
   }
