@@ -197,3 +197,10 @@ No failures or debugging cycles.
 ### Notes (no other failures)
 - The transport tests passed on the first run. Same-hospital accepts create a DELIVERED transport immediately, so the tests pick a candidate whose hospital differs from the organ's recovering hospital; otherwise there is no PENDING row to test.
 - Transport `FAILED` and `ALLOCATED` organ expiry are not exercised: OL-DEC-02 (A) records them as a known limitation.
+
+## OL-018
+
+### Notes (no failures)
+- Postgres and `.env` were already in place; server (97) and client (66) tests passed on the first run. No debugging cycles.
+- A transplant cascade changes seeded data permanently: the recipient's waitlist entry becomes TRANSPLANTED and cannot be undone through the API. The server tests therefore record each touched entry first and restore it in `test.after` (and delete any extra entry they insert), along with the cloned organs, offers, transports and transplants. Cleanup must delete `transplant_event` before `organ_offer` (RESTRICT FK).
+- My first draft of the "offer not accepted" test was convoluted and could silently return early. I rewrote it to build its own CREATED offer on a cloned organ. **Prevent:** a test that can `return` before asserting should be rewritten to create its own fixture.

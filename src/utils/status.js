@@ -7,6 +7,7 @@ const STATUS_VARIANTS = {
   accepted: 'success',
   delivered: 'success',
   transplanted: 'success',
+  success: 'success',
   active: 'success',
   available: 'success',
   // amber

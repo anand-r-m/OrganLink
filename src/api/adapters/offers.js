@@ -1,5 +1,14 @@
 import { donorId, offerId, organId, recipientId } from '../../utils/displayId.js';
 
+// API Transplant -> row summary (hospital display id is not needed; the name is shown).
+export const adaptTransplant = (t) =>
+  t ? { dbId: t.id, hospitalId: t.hospitalId, hospitalName: t.hospitalName, transplantAt: t.transplantAt, outcome: t.outcome, notes: t.notes } : null;
+
+// Record Transplant is enabled only once the accepted offer's transport is DELIVERED (07 §6).
+export const TRANSPLANT_DISABLED_TIP = 'Organ has not been delivered yet';
+export const canRecordTransplant = (offer) =>
+  offer.status === 'ACCEPTED' && !offer.transplant && offer.transport?.status === 'DELIVERED';
+
 // API Offer -> Offer Workflow row. Statuses stay UPPER_SNAKE; display ids are made here (A11).
 export function adaptOffer(o) {
   let response = null;
@@ -25,6 +34,8 @@ export function adaptOffer(o) {
     declineNotes: o.notes,
     matchRunId: o.matchRunId,
     rank: o.rank,
+    transport: o.transport ?? null,
+    transplant: adaptTransplant(o.transplant),
   };
 }
 
@@ -52,5 +63,7 @@ export function adaptMockOffer(m) {
     declineNotes: m.declineNotes ?? null,
     matchRunId: null,
     rank: null,
+    transport: null,
+    transplant: null,
   };
 }

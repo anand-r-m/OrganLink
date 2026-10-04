@@ -8,6 +8,7 @@ import {
   Stack,
   Text,
   Textarea,
+  TextInput,
   Title,
   Tooltip,
 } from '@mantine/core';
@@ -19,6 +20,7 @@ import {
   IconBan,
   IconBuildingHospital,
   IconCheck,
+  IconHeartbeat,
   IconPlus,
   IconSend,
   IconX,
@@ -36,6 +38,8 @@ import { mockRecipients } from '../data/mockRecipients.js';
 
 import { USE_LIVE_API } from '../api/client.js';
 import { acceptOffer, advanceOffer, cancelOffer, declineOffer, listOffers, saveMockOffer, sendOffer } from '../api/offers.js';
+import { recordTransplant, TRANSPLANT_OUTCOMES } from '../api/transplants.js';
+import { canRecordTransplant, TRANSPLANT_DISABLED_TIP } from '../api/adapters/offers.js';
 import { getLookups } from '../api/lookups.js';
 import { showApiError } from '../api/notify.js';
 import { recipientId } from '../utils/displayId.js';
@@ -54,6 +58,9 @@ const ADVANCE_FROM = ['DECLINED', 'EXPIRED', 'VOIDED', 'CANCELLED'];
 function formatDateTime(value) {
   return value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '—';
 }
+
+const DATETIME_LOCAL = 'YYYY-MM-DDTHH:mm';
+const outcomeLabel = (value) => TRANSPLANT_OUTCOMES.find((o) => o.value === value)?.label ?? value;
 
 export default function OfferWorkflowPage() {
   const navigate = useNavigate();
@@ -82,6 +89,12 @@ export default function OfferWorkflowPage() {
   const [declineErrors, setDeclineErrors] = useState({});
   /* Live decline reasons come from /api/lookups (coded reasons); mock mode keeps its text list. */
   const [declineOptions, setDeclineOptions] = useState(DECLINE_REASONS);
+  /* Record Transplant modal (outcome, timestamp, notes; 07 §7). */
+  const [transplantTarget, setTransplantTarget] = useState(null);
+  const [transplantOutcome, setTransplantOutcome] = useState('');
+  const [transplantAt, setTransplantAt] = useState('');
+  const [transplantNotes, setTransplantNotes] = useState('');
+  const [transplantErrors, setTransplantErrors] = useState({});
   /* Result of the last Advance to Next: the new offer and the ranks that were skipped. */
   const [advanceResult, setAdvanceResult] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -121,6 +134,19 @@ export default function OfferWorkflowPage() {
     setDeclineReason('');
     setDeclineNotes('');
     setDeclineErrors({});
+  }
+
+  function openTransplantModal(offer) {
+    setTransplantOutcome('');
+    setTransplantAt(dayjs().format(DATETIME_LOCAL));
+    setTransplantNotes('');
+    setTransplantErrors({});
+    setTransplantTarget(offer);
+  }
+
+  function closeTransplantModal() {
+    setTransplantTarget(null);
+    setTransplantErrors({});
   }
 
   /* --- Derived options ---------------------------------------------------- */
@@ -293,6 +319,39 @@ export default function OfferWorkflowPage() {
     }
   }
 
+  async function handleRecordTransplant() {
+    const offer = transplantTarget;
+    if (!offer || busy) return;
+    const errors = {};
+    if (!transplantOutcome) errors.outcome = 'Select an outcome';
+    if (!transplantAt || Number.isNaN(Date.parse(transplantAt))) errors.at = 'Enter the transplant date and time';
+    else if (dayjs(transplantAt).isAfter(dayjs())) errors.at = 'Transplant time cannot be in the future';
+    setTransplantErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+
+    setBusy(true);
+    try {
+      const transplant = await recordTransplant(offer, {
+        outcome: transplantOutcome,
+        transplantAt: new Date(transplantAt).toISOString(),
+        notes: transplantNotes.trim(),
+      });
+      replaceOffer({ ...offer, transplant });
+      notifications.show({
+        title: 'Transplant recorded',
+        message: `${offer.id}: ${outcomeLabel(transplantOutcome)}`,
+        color: transplantOutcome === 'SUCCESS' ? 'green' : 'orange',
+      });
+      closeTransplantModal();
+    } catch (error) {
+      showApiError(error, 'Record transplant failed');
+      closeTransplantModal();
+      listOffers().then(setOffers).catch(() => {});
+    } finally {
+      setBusy(false);
+    }
+  }
+
   /* Declined -> "Advance to Next": pre-fill a fresh Created offer for the same
      organ and the next-ranked (highest priority) eligible recipient. */
   function pickNextCandidate(organ, declinedOffer) {
@@ -406,6 +465,18 @@ export default function OfferWorkflowPage() {
         onClick: () => handleCancelOffer(offer),
       });
     }
+    if (offer.status === 'ACCEPTED' && !offer.transplant) {
+      const ready = canRecordTransplant(offer);
+      actions.push({
+        label: 'Record Transplant',
+        variant: 'filled',
+        color: 'var(--color-success)',
+        icon: <IconHeartbeat size={14} aria-hidden="true" />,
+        disabled: !ready,
+        tooltip: ready ? null : TRANSPLANT_DISABLED_TIP,
+        onClick: () => openTransplantModal(offer),
+      });
+    }
     if (ADVANCE_FROM.includes(offer.status) && (!USE_LIVE_API || offer.matchRunId)) {
       actions.push({
         label: 'Advance to Next',
@@ -491,6 +562,28 @@ export default function OfferWorkflowPage() {
       },
     },
     {
+      id: 'transplant',
+      header: 'Transplant',
+      size: 150,
+      Cell: ({ row }) => {
+        const t = row.original.transplant;
+        if (!t) {
+          return (
+            <Text size="xs" c="var(--text-muted)">
+              —
+            </Text>
+          );
+        }
+        return (
+          <Tooltip label={t.notes ? `${formatDateTime(t.transplantAt)}\nNotes: ${t.notes}` : formatDateTime(t.transplantAt)} multiline>
+            <span>
+              <StatusBadge status={t.outcome} label={outcomeLabel(t.outcome)} />
+            </span>
+          </Tooltip>
+        );
+      },
+    },
+    {
       id: 'actions',
       header: 'Actions',
       size: 250,
@@ -507,17 +600,22 @@ export default function OfferWorkflowPage() {
         return (
           <Group gap={6} wrap="nowrap">
             {actions.map((action) => (
-              <Button
-                key={action.label}
-                size="xs"
-                variant={action.variant}
-                color={action.color}
-                leftSection={action.icon}
-                onClick={action.onClick}
-                aria-label={action.label}
-              >
-                {action.label}
-              </Button>
+              <Tooltip key={action.label} label={action.tooltip} disabled={!action.tooltip}>
+                {/* The wrapper keeps the tooltip working while the button is disabled. */}
+                <span>
+                  <Button
+                    size="xs"
+                    variant={action.variant}
+                    color={action.color}
+                    leftSection={action.icon}
+                    onClick={action.onClick}
+                    disabled={action.disabled}
+                    aria-label={action.label}
+                  >
+                    {action.label}
+                  </Button>
+                </span>
+              </Tooltip>
             ))}
           </Group>
         );
@@ -789,6 +887,51 @@ export default function OfferWorkflowPage() {
             Recording acceptance marks the organ as Allocated and creates a transport record.
             Surgery is recorded separately as a transplant.
           </Text>
+        </Stack>
+      </FormModal>
+
+      {/* Record Transplant Modal */}
+      <FormModal
+        opened={!!transplantTarget}
+        onClose={closeTransplantModal}
+        title="Record Transplant"
+        submitLabel="Record Transplant"
+        loading={busy}
+        onSubmit={handleRecordTransplant}
+        size="md"
+      >
+        <Stack gap={16}>
+          <Text size="sm" c="var(--text-secondary)">
+            Record the surgery outcome for <span className="mono">{transplantTarget?.id ?? 'this offer'}</span> (
+            <span className="mono">{transplantTarget?.organId ?? ''}</span> →{' '}
+            <span className="mono">{transplantTarget?.recipientId ?? ''}</span>). This cannot be changed afterwards.
+          </Text>
+          <Select
+            label="Outcome"
+            required
+            placeholder="Select an outcome"
+            data={TRANSPLANT_OUTCOMES}
+            value={transplantOutcome}
+            onChange={(value) => setTransplantOutcome(value ?? '')}
+            error={transplantErrors.outcome}
+          />
+          <TextInput
+            label="Transplant time"
+            type="datetime-local"
+            required
+            value={transplantAt}
+            max={dayjs().format(DATETIME_LOCAL)}
+            onChange={(event) => setTransplantAt(event.currentTarget.value)}
+            error={transplantErrors.at}
+          />
+          <Textarea
+            label="Notes"
+            description="Optional"
+            placeholder="Additional notes (optional)"
+            value={transplantNotes}
+            onChange={(event) => setTransplantNotes(event.currentTarget.value)}
+            minRows={3}
+          />
         </Stack>
       </FormModal>
 
