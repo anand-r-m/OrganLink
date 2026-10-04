@@ -2,9 +2,9 @@
 
 This document is the single source of truth for every endpoint the frontend calls. Endpoints come from `docs/context/05_tdd.md` §5. Anything added beyond §5 is marked **Proposed — needs approval**.
 
-> **⚠ Pending decision OL-DEC-01 (TBD — requires human approval).** Every shape below assumes **Option B**: schema-shaped camelCase JSON, with frontend adapters mapping it to the existing component props. If the team picks Option A (mock-shaped), the response shapes in this file must be rewritten before OL-005. See `AUDIT_NOTES.md` → OL-DEC-01.
+> **✅ OL-DEC-01 APPROVED (2026-10-04): Option B.** Every shape below is schema-shaped camelCase JSON, with frontend adapters mapping it to the existing component props. See `AUDIT_NOTES.md` → OL-DEC-01.
 >
-> **⚠ Pending decision OL-DEC-02 (TBD).** This decision affects the error cases of `POST /api/transport/:id/deliver` and `POST /api/transplants` when an organ expires in transit. Both are marked inline.
+> **✅ OL-DEC-02 RESOLVED (2026-10-04): accepted limitation.** The sweep only expires `AVAILABLE` organs, so an `ALLOCATED` organ in transit never expires, its transport is never auto-failed, and a transplant can still be recorded once the transport is `DELIVERED`. The schema is not changed. See `AUDIT_NOTES.md` → OL-DEC-02.
 
 ---
 
@@ -632,7 +632,7 @@ The countdown comes from the organ's viability window. There is no separate tran
   - 422 `RULE_VIOLATION`: "Cannot record transplant: offer % is not accepted", or "… organ % has not been delivered" (BR-13).
   - 409 `TRANSPLANT_ALREADY_RECORDED`.
   - 400 `VALIDATION_ERROR`: bad outcome.
-  - *(OL-DEC-02 = B only)* 422 `RULE_VIOLATION`: "organ expired before transplant".
+  - *Known limitation (OL-DEC-02):* no viability check. An organ that expired while in transit is not rejected here.
 
 ### Transport
 
@@ -655,7 +655,7 @@ The countdown comes from the organ's viability window. There is no separate tran
 - Error responses:
   - 404.
   - 409 `INVALID_STATE_TRANSITION` (requires `IN_TRANSIT`).
-  - *(OL-DEC-02 = B only)* 409 `INVALID_STATE_TRANSITION` with `currentStatus: "FAILED"` when the organ expired in transit. *(OL-DEC-02 = A)* No expiry check; this is a documented limitation.
+  - *Known limitation (OL-DEC-02):* no expiry check. An allocated organ that passes its viability window in transit is not expired by the sweep and the transport is not set to `FAILED`.
 
 ### Reports
 

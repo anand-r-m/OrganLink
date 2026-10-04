@@ -18,6 +18,8 @@ These are human decisions. None of them blocks Phase 1 tasks OL-001 to OL-004. E
 
 ### OL-DEC-01 — Decide API response shape strategy
 
+- Status: **RESOLVED 2026-10-04 — Option B (schema-shaped API + frontend adapters).**
+
 - Phase: gate
 - Owner: TBA (whole team)
 - Dependencies: none
@@ -37,6 +39,8 @@ These are human decisions. None of them blocks Phase 1 tasks OL-001 to OL-004. E
 
 ### OL-DEC-02 — Decide in-transit expiry handling
 
+- Status: **RESOLVED 2026-10-04 — Option A (documented limitation; schema unchanged; no OL-001b).**
+
 - Phase: gate
 - Owner: TBA (whole team)
 - Dependencies: none
@@ -55,6 +59,8 @@ These are human decisions. None of them blocks Phase 1 tasks OL-001 to OL-004. E
   - Show the recorded decision.
 
 ### OL-DEC-03 — Decide demo bar (all-live vs mixed)
+
+- Status: **RESOLVED 2026-10-04 — Option B (mixed mock/live), core allocation flow fully live.** MUST: OL-020 to OL-023. STRETCH: OL-024 to OL-028.
 
 - Phase: gate
 - Owner: TBA (whole team)

@@ -83,6 +83,8 @@ Audit of the repo at `9d5b524` (main) against the nine spec files in `docs/conte
 | A16 | No task owners | Suggest owners from `dev_split.md` page ownership: Dev1 Dashboard/Reports/Transport, Dev2 Donors/Recipients/Settings, Dev3 Login/Matching/Offers. Foundation is shared. | all |
 | A17 | C12: discard with an open offer | Discard requires no CREATED or SENT offer (409 `ACTIVE_OFFER_EXISTS`, telling the user to cancel it first). Only allowed from AVAILABLE or EXPIRED. ALLOCATED organs are discarded through the transplant outcome. | OL-023 |
 
+A8 (admin hash): The hash in docs/context/02_seed_reference-2.sql was incorrect. OL-001 verified this and used a corrected hash in db/02_seed_reference.sql (admin verified with bcryptjs).
+
 ### BLOCKING HUMAN DECISIONS (left TBD; each has a gate task in BACKLOG.md)
 
 **OL-DEC-01: API response shape strategy (C1).**
@@ -91,7 +93,11 @@ Audit of the repo at `9d5b524` (main) against the nine spec files in `docs/conte
 - **Option B, schema-shaped API with frontend adapters:** camelCase JSON with integer IDs and UPPER_SNAKE enums. Thin `src/api/adapters/*.js` map rows to the props the components already use.
   - *Changes:* one adapter per resource. The API stays faithful to the schema and the BRs.
 - *Files/tasks:* OL-005 and every endpoint/UI task from OL-010 to OL-028; all shapes in `API_CONTRACT.md`.
-- **Fastest low-risk option: B.** `API_CONTRACT.md` is drafted assuming B and carries a TBD banner until this is decided.
+- **Fastest low-risk option: B.** `API_CONTRACT.md` is drafted assuming B.
+- **✅ RESOLVED 2026-10-04: Option B approved (schema-shaped API + frontend adapters).**
+  - *Mismatches confirmed* (`src/data/mock*.js` vs `01_schema.sql`): string IDs (`DNR-0912`, `K-0912`, `OFR-2201`, `TRN-0044`) vs `BIGINT` identity keys; Title Case statuses (`Waiting`, `Sent`, `In Transit`, `Preparing`) vs UPPER_SNAKE CHECK values (`ACTIVE`, `SENT`, `IN_TRANSIT`, `PENDING`); `donor.organType` and `donor.status: 'Deceased'` vs organs coming only from `organ` rows and `donor_type`/`status` being separate columns; `age` vs `date_of_birth`; one `hlaA/hlaB/hlaDR` string per locus vs `donor_hla`/`recipient_hla` sets; single `recipient.organNeeded`/`urgency`/`waitTime` vs many `waitlist_entry` rows; `viabilityHours`/`elapsedHours` vs `organ.recovered_at` plus `organ_type.max_viability_hours`; display names (`hospital`, `region`) vs FK ids.
+  - *Feasibility confirmed:* the mismatches are field-level and mechanical. `05_tdd.md` §7 keeps the mock layer behind `VITE_DATA_SOURCE`, so one pure adapter per resource (`src/api/adapters/<resource>.js`) can map API rows to the existing mock-shaped props, and the mock files stay as the fallback. Option A is rejected because multi-organ waitlists and multi-allele HLA can't be represented in the mock shapes.
+  - *Consequence:* all response shapes in `API_CONTRACT.md` are final for this strategy. No adapters are implemented as part of this decision.
 
 **OL-DEC-02: in-transit expiry gap (C4).**
 - **Option A, document only:** record it as a known limitation and keep the schema as specified. The demo avoids letting an in-transit organ expire.
@@ -100,6 +106,10 @@ Audit of the repo at `9d5b524` (main) against the nine spec files in `docs/conte
   - *Changes:* the DB copy diverges from `docs/context/01_schema.sql`, 09 must be re-run, and OL-032 gains a test.
 - *Files/tasks:* `db/01_schema.sql` (new follow-up task OL-001b if B), OL-017, OL-018, OL-032.
 - **Fastest low-risk option: A.**
+- **✅ RESOLVED 2026-10-04: Option A approved (documented limitation; schema unchanged).**
+  - *Gap confirmed:* `expire_stale_offers()` step 3 only expires organs with `status = 'AVAILABLE'`. An `ALLOCATED` organ in transit is never set to `EXPIRED`, so step 6 (fail transports carrying expired organs) never fires for it. `fn_transplant_requires_delivery()` checks only offer status and transport `DELIVERED`, with no viability check. This contradicts `06_user_flow.md` Stage 6.
+  - *Why not fixed:* a proper fix needs changes to the sweep and the transplant trigger in `01_schema.sql` (Option B), which would diverge the DB copy from `docs/context/`, force a re-run of 09, and add a test. The deadline doesn't allow it.
+  - *Accepted limitation:* an organ whose viability window elapses after allocation stays `ALLOCATED`, its transport is not auto-failed, and a transplant can still be recorded once the transport is `DELIVERED`. The demo must not exercise or claim the in-transit failure path, and BR-2 and BR-13 are demonstrated only for `AVAILABLE` organs and the delivery gate. No OL-001b task is created.
 
 **OL-DEC-03: demo bar, all screens live or mixed (04_prd.md §7 vs 05_tdd.md §7).**
 - **Option A, all live:** every screen reads from Postgres (PRD §7 "every UI screen backed by real queries").
@@ -108,3 +118,8 @@ Audit of the repo at `9d5b524` (main) against the nine spec files in `docs/conte
   - *Changes:* Phase 3 becomes priority-ordered and the rehearsal script marks mock pages.
 - *Files/tasks:* priority of OL-020 to OL-028; OL-033; OL-034.
 - **Fastest low-risk option: B.** Aim for A if time allows.
+- **✅ RESOLVED 2026-10-04: Option B approved (mixed mock/live), with the core allocation flow fully live.**
+  - *Core flow, must be live:* Login, Donors (registry, drawer, Procure Organ), Organs, Matching console, Offers (create, send, accept, decline), Transport (depart, deliver), and Record Transplant. These are OL-011 to OL-019, the Phase 2 slice.
+  - *Also MUST:* Recipients and waitlist (OL-021, OL-022), donor create/update (OL-020), and organ discard (OL-023), since the demo reads and edits these records.
+  - *STRETCH (may stay mock behind `VITE_DATA_SOURCE`):* Settings (OL-024, OL-025), Reports (OL-026), Dashboard (OL-027), and Audit PDF (OL-028). Aim for all-live if time allows.
+  - *Consequence:* the rehearsal script (OL-034) and README (OL-033) must mark which pages are live and which are mock.

@@ -16,7 +16,10 @@ The hash in the spec seed (`$2b$10$N9qo8uLOick...hy`) does NOT match `admin`:
 
 Regenerated with `bcryptjs.hashSync('admin',10)` and replaced in `db/02_seed_reference.sql` only:
 `$2b$10$NMptt9TIflZAmJHIiv0ObOpfP9kHnzqg55nci/G6lXH8OubGHmz9W` (`compareSync` -> `true`).
-**Follow-up:** add this note to AUDIT_NOTES A8 (not done here; out of scope for this task's edits).
+**Follow-up (done):** the note is recorded in AUDIT_NOTES A8.
+
+## Safety
+`scripts/db-reset.sh` refuses to run unless the target host is localhost / 127.0.0.1 / ::1 / a Unix socket / empty (override: `ALLOW_NONLOCAL_RESET=1`) and the database name is `organlink`. It prints `Resetting <host>/organlink`, then asks for `y` on a TTY; non-interactive runs must pass `--yes` (`npm run db:reset -- --yes`).
 
 ## Commands run and results
 Run against a throwaway PostgreSQL 18.6 cluster on `localhost:5433`
