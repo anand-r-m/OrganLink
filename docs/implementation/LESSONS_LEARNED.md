@@ -147,3 +147,28 @@ No failures or debugging cycles.
 - Environment: no Postgres was running. I started a throwaway PG 18 on port 5433 (`-k /tmp/ol14sock`, `LC_ALL=en_US.UTF-8`) and ran `db:reset --yes` against it.
 - The live-server curl check ran against the seeded DB, so match runs accumulated in it. Tests only assert relative counts (before/after) for that reason.
 - Design note: all-zero effective weights are rejected in the route before calling `match_candidates`. The effective weights include regional defaults, so `{hla:0}` alone is valid if the region has other non-zero weights.
+
+## OL-015
+
+### Test expected 400 REFERENCE_NOT_FOUND for a nonexistent recipient
+- **Symptom:** `POST /api/offers` with `recipientId: 999999` returned 422, not 400.
+- **Root cause:** the `BEFORE INSERT` recipient-status trigger ("Recipient % is not active") fires before the FK is checked, so the DB raises P0001 first. The contract already lists that 422 message.
+- **Fix:** the test now expects 422 `RULE_VIOLATION` for a bad recipient, and keeps 400 `REFERENCE_NOT_FOUND` for a bad organ (the route's own lock finds no row).
+- **Prevent/detect:** BEFORE triggers run ahead of FK checks. Expect `RULE_VIOLATION` for missing referenced rows on tables that have such triggers.
+
+### Mock organ list started reporting open offers, which broke an exact-equality client test
+- **Symptom:** `tests/client/organs.test.js` "mock mode uses mockOrgans" failed on `deepEqual(rows[0], adaptMockOrgan(...))`.
+- **Root cause:** mock `listOrgans` now overlays `hasActiveOffer` from the shared mock offer store, and the seeded mock offers include an open one for organ 0.
+- **Fix:** the assertion neutralises `hasActiveOffer` and says why. No product change.
+- **Prevent/detect:** when a mock adapter gains a derived field, grep the tests for `deepEqual` against that adapter.
+
+### Shell/tooling slips in validation (no product impact)
+- **Symptom:** `sed -i "s/..."` failed with "unterminated substitute pattern", and a `curl $J ...` option string was treated as one argument.
+- **Root cause:** BSD `sed -i` needs a backup-suffix argument, and zsh does not word-split unquoted variables.
+- **Fix:** Python for file edits; a bash script file (`bash flow.sh`) for the curl flow.
+- **Prevent/detect:** put multi-step curl flows in a script run with `bash`; avoid `sed -i` on macOS.
+
+### Notes (no failures)
+- Server (78), client (47) tests and the build passed after the fixes above. Lint shows no new warnings; I removed an unused import and un-exported two page constants to avoid fast-refresh warnings.
+- Environment: no Postgres was running. I started a throwaway PG 18 on port 5433 (`-k /tmp/ol15sock`, `LC_ALL=en_US.UTF-8`) and ran `db:reset --yes` against it.
+- The console effect that loads weights and the latest run was keyed on the selected organ object. Refreshing organs after creating an offer would have reset the sliders, so it is now keyed on `selectedKey`.

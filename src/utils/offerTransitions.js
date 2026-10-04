@@ -2,23 +2,25 @@
    Kept separate from presentation so the workflow rules are easy to inspect
    and reuse (Dev 3 Task 3.3). */
 
-/* Documented statuses (Section 5.6): Created / Sent / Accepted / Declined / Expired */
-export const OFFER_STATUSES = ['Created', 'Sent', 'Accepted', 'Declined', 'Expired'];
+/* Statuses use the schema's UPPER_SNAKE values (live and mock). Mock mode only. */
+export const OFFER_STATUSES = ['CREATED', 'SENT', 'ACCEPTED', 'DECLINED', 'EXPIRED', 'VOIDED', 'CANCELLED'];
 
 /* One-active-offer rule (Section 5.6): an organ has an "active" offer when a
-   Created or Sent offer exists for it. Accepted / Declined / Expired are
+   CREATED or SENT offer exists for it. ACCEPTED / DECLINED / EXPIRED / VOIDED / CANCELLED are
    terminal and do not block a new offer for the same organ. */
-export const ACTIVE_OFFER_STATUSES = ['Created', 'Sent'];
+export const ACTIVE_OFFER_STATUSES = ['CREATED', 'SENT'];
 
 /* User-actionable transitions. Expired is applied automatically by the system
    after the viability window (no user action), so it is not listed as a target
    of any user transition. */
 export const OFFER_TRANSITIONS = {
-  Created: ['Sent'],
-  Sent: ['Accepted', 'Declined'],
-  Accepted: [],
-  Declined: [],
-  Expired: [],
+  CREATED: ['SENT', 'CANCELLED'],
+  SENT: ['ACCEPTED', 'DECLINED', 'CANCELLED'],
+  ACCEPTED: [],
+  DECLINED: [],
+  EXPIRED: [],
+  VOIDED: [],
+  CANCELLED: [],
 };
 
 /* Six documented decline reasons (Section 5.6). */
@@ -86,7 +88,7 @@ export function createOfferFromSelection({ offers, organs, organId, recipientId 
     organType: organ?.organType ?? 'Unknown',
     donorId: organ?.donorId ?? 'Unknown',
     recipientId,
-    status: 'Created',
+    status: 'CREATED',
     offeredAt: new Date().toISOString(),
     response: null,
     declineReason: null,

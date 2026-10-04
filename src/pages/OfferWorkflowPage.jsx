@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Button,
   Group,
@@ -15,13 +15,14 @@ import { notifications } from '@mantine/notifications';
 import {
   IconAlertTriangle,
   IconArrowRight,
+  IconBan,
   IconBuildingHospital,
   IconCheck,
   IconPlus,
   IconSend,
   IconX,
 } from '@tabler/icons-react';
-import { useLocation } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
 
 import DataTable from '../components/DataTable.jsx';
@@ -29,9 +30,12 @@ import FormModal from '../components/FormModal.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
 
 import { mockDonors } from '../data/mockDonors.js';
-import { mockOffers } from '../data/mockOffers.js';
 import { mockOrgans } from '../data/mockOrgans.js';
 import { mockRecipients } from '../data/mockRecipients.js';
+
+import { USE_LIVE_API } from '../api/client.js';
+import { cancelOffer, listOffers, saveMockOffer, sendOffer } from '../api/offers.js';
+import { showApiError } from '../api/notify.js';
 
 import {
   DECLINE_REASONS,
@@ -42,6 +46,8 @@ import {
   transitionOffer,
 } from '../utils/offerTransitions.js';
 
+// Accept, decline and advance are wired to the API in OL-016; until then they run on mock data only.
+const MOCK_ONLY_ACTIONS = !USE_LIVE_API;
 const ACCEPT_RESPONSE = 'Accepted — transplant scheduled';
 
 function formatDateTime(value) {
@@ -49,14 +55,15 @@ function formatDateTime(value) {
 }
 
 export default function OfferWorkflowPage() {
-  const location = useLocation();
+  const navigate = useNavigate();
 
   /* Local state initialized from mock data. The imported arrays are never
      mutated — every update produces new objects/arrays (Section 5.6, task
      "do not mutate mockOffers.js"). Organs/recipients are mirrored locally so
      an accepted offer can mark the organ Allocated and the recipient
      Transplanted without touching the shared mock modules. */
-  const [offers, setOffers] = useState(mockOffers);
+  const [offers, setOffers] = useState([]);
+  const [offersLoading, setOffersLoading] = useState(true);
   const [organs, setOrgans] = useState(mockOrgans);
   const [recipients, setRecipients] = useState(mockRecipients);
 
@@ -73,20 +80,16 @@ export default function OfferWorkflowPage() {
   const [declineNotes, setDeclineNotes] = useState('');
   const [declineErrors, setDeclineErrors] = useState({});
 
-  /* Pre-fill from the Matching Console ("Create Offer" navigates to /offers
-     with { organId, recipientId }) — Task 3.2 -> Task 3.3 handoff. */
-  const prefillHandled = useRef(false);
+  /* The list comes from the API layer (live: GET /api/offers; mock: the shared mock store). */
   useEffect(() => {
-    if (prefillHandled.current) return;
-    const prefill = location.state;
-    if (prefill?.organId) {
-      setCreateOrganId(prefill.organId);
-      if (prefill.recipientId) setCreateRecipientId(prefill.recipientId);
-      setCreateErrors({});
-      createHandlers.open();
-    }
-    prefillHandled.current = true;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let cancelled = false;
+    listOffers()
+      .then((rows) => !cancelled && setOffers(rows))
+      .catch((err) => !cancelled && showApiError(err, 'Could not load offers'))
+      .finally(() => !cancelled && setOffersLoading(false));
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   function resetCreateForm() {
@@ -149,9 +152,9 @@ export default function OfferWorkflowPage() {
 
   const summary = useMemo(() => {
     const active = offers.filter((offer) => isActiveOfferStatus(offer.status)).length;
-    const accepted = offers.filter((offer) => offer.status === 'Accepted').length;
-    const declined = offers.filter((offer) => offer.status === 'Declined').length;
-    const expired = offers.filter((offer) => offer.status === 'Expired').length;
+    const accepted = offers.filter((offer) => offer.status === 'ACCEPTED').length;
+    const declined = offers.filter((offer) => offer.status === 'DECLINED').length;
+    const expired = offers.filter((offer) => offer.status === 'EXPIRED').length;
     return { active, accepted, declined, expired, total: offers.length };
   }, [offers]);
 
@@ -161,17 +164,25 @@ export default function OfferWorkflowPage() {
     notifications.show({ title, message, color: 'red' });
   }
 
-  function handleSendOffer(offer) {
+  const replaceOffer = (updated) => setOffers((prev) => prev.map((o) => (o.id === updated.id ? updated : o)));
+
+  async function handleSendOffer(offer) {
     try {
-      const updated = transitionOffer(offer, 'Sent');
-      setOffers((prev) => prev.map((o) => (o.id === offer.id ? updated : o)));
-      notifications.show({
-        title: 'Offer sent',
-        message: `${offer.id} sent to ${offer.recipientId}`,
-        color: 'blue',
-      });
+      replaceOffer(await sendOffer(offer));
+      notifications.show({ title: 'Offer sent', message: `${offer.id} sent to ${offer.recipientId}`, color: 'blue' });
     } catch (error) {
-      notifyError('Action blocked', error.message);
+      showApiError(error, 'Send failed');
+      listOffers().then(setOffers).catch(() => {});
+    }
+  }
+
+  async function handleCancelOffer(offer) {
+    try {
+      replaceOffer(await cancelOffer(offer));
+      notifications.show({ title: 'Offer cancelled', message: `${offer.id} cancelled`, color: 'gray' });
+    } catch (error) {
+      showApiError(error, 'Cancel failed');
+      listOffers().then(setOffers).catch(() => {});
     }
   }
 
@@ -197,6 +208,7 @@ export default function OfferWorkflowPage() {
       organId: createOrganId,
       recipientId: createRecipientId,
     });
+    saveMockOffer(newOffer);
     setOffers((prev) => [newOffer, ...prev]);
     notifications.show({
       title: 'Offer created',
@@ -211,7 +223,8 @@ export default function OfferWorkflowPage() {
     const offer = acceptTarget;
     if (!offer) return;
     try {
-      const updated = transitionOffer(offer, 'Accepted', { response: ACCEPT_RESPONSE });
+      const updated = transitionOffer(offer, 'ACCEPTED', { response: ACCEPT_RESPONSE });
+      saveMockOffer(updated);
       setOffers((prev) => prev.map((o) => (o.id === offer.id ? updated : o)));
       setOrgans((prev) =>
         prev.map((organ) => (organ.id === offer.organId ? { ...organ, status: 'Allocated' } : organ)),
@@ -241,11 +254,12 @@ export default function OfferWorkflowPage() {
     if (Object.keys(errors).length > 0) return;
 
     try {
-      const updated = transitionOffer(offer, 'Declined', {
+      const updated = transitionOffer(offer, 'DECLINED', {
         response: declineReason,
         declineReason,
         declineNotes: declineNotes.trim() || undefined,
       });
+      saveMockOffer(updated);
       setOffers((prev) => prev.map((o) => (o.id === offer.id ? updated : o)));
       notifications.show({
         title: 'Offer declined',
@@ -308,7 +322,7 @@ export default function OfferWorkflowPage() {
     const actions = [];
     const transitions = getAllowedTransitions(offer.status);
 
-    if (transitions.includes('Sent')) {
+    if (transitions.includes('SENT')) {
       actions.push({
         label: 'Send Offer',
         variant: 'filled',
@@ -317,7 +331,7 @@ export default function OfferWorkflowPage() {
         onClick: () => handleSendOffer(offer),
       });
     }
-    if (transitions.includes('Accepted')) {
+    if (MOCK_ONLY_ACTIONS && transitions.includes('ACCEPTED')) {
       actions.push({
         label: 'Record Accept',
         variant: 'filled',
@@ -326,7 +340,7 @@ export default function OfferWorkflowPage() {
         onClick: () => setAcceptTarget(offer),
       });
     }
-    if (transitions.includes('Declined')) {
+    if (MOCK_ONLY_ACTIONS && transitions.includes('DECLINED')) {
       actions.push({
         label: 'Record Decline',
         variant: 'light',
@@ -338,7 +352,16 @@ export default function OfferWorkflowPage() {
         },
       });
     }
-    if (offer.status === 'Declined') {
+    if (transitions.includes('CANCELLED')) {
+      actions.push({
+        label: 'Cancel Offer',
+        variant: 'subtle',
+        color: 'var(--text-secondary)',
+        icon: <IconBan size={14} aria-hidden="true" />,
+        onClick: () => handleCancelOffer(offer),
+      });
+    }
+    if (MOCK_ONLY_ACTIONS && offer.status === 'DECLINED') {
       actions.push({
         label: 'Advance to Next',
         variant: 'subtle',
@@ -391,13 +414,25 @@ export default function OfferWorkflowPage() {
       Cell: ({ cell }) => <span className="mono">{formatDateTime(cell.getValue())}</span>,
     },
     {
+      accessorKey: 'sentAt',
+      header: 'Sent At',
+      size: 150,
+      Cell: ({ cell }) => <span className="mono">{formatDateTime(cell.getValue())}</span>,
+    },
+    {
+      accessorKey: 'offerExpiresAt',
+      header: 'Response Deadline',
+      size: 160,
+      Cell: ({ cell }) => <span className="mono">{formatDateTime(cell.getValue())}</span>,
+    },
+    {
       accessorKey: 'response',
       header: 'Response',
       size: 160,
       Cell: ({ row }) => {
         const offer = row.original;
         const text =
-          offer.status === 'Declined'
+          offer.status === 'DECLINED'
             ? offer.declineReason ?? offer.response
             : offer.response;
         const tooltipLabel = offer.declineNotes
@@ -477,14 +512,16 @@ export default function OfferWorkflowPage() {
             Manage organ offers from creation through acceptance or decline
           </Text>
         </div>
-        <Tooltip label={createButtonTooltip} disabled={!createButtonDisabled}>
+        <Tooltip label={createButtonTooltip} disabled={USE_LIVE_API || !createButtonDisabled}>
           <Button
             leftSection={<IconPlus size={18} aria-hidden="true" />}
             onClick={() => {
+              // An offer is made for a ranked candidate, so live mode starts from the console.
+              if (USE_LIVE_API) return navigate('/matching');
               resetCreateForm();
               createHandlers.open();
             }}
-            disabled={createButtonDisabled}
+            disabled={!USE_LIVE_API && createButtonDisabled}
             aria-label="Create Offer"
           >
             Create Offer
@@ -508,7 +545,7 @@ export default function OfferWorkflowPage() {
       <DataTable
         columns={columns}
         data={offers}
-        emptyMessage="No offers found"
+        emptyMessage={offersLoading ? 'Loading offers...' : 'No offers found'}
         enableRowActions={false}
       />
 

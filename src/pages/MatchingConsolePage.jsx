@@ -15,6 +15,7 @@ import {
   Stack,
   Text,
   Title,
+  Tooltip,
 } from '@mantine/core';
 import {
   IconAdjustments,
@@ -26,7 +27,7 @@ import {
   IconRefresh,
   IconUserCheck,
 } from '@tabler/icons-react';
-import { useNavigate } from 'react-router-dom';
+import { notifications } from '@mantine/notifications';
 
 import CircularProgress from '../components/CircularProgress.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
@@ -34,6 +35,7 @@ import StatusBadge from '../components/StatusBadge.jsx';
 import { getDefaultWeights, getLatestRun, runMatch } from '../api/matching.js';
 import { runLabel } from '../api/adapters/matching.js';
 import { showApiError } from '../api/notify.js';
+import { createOffer } from '../api/offers.js';
 import { listOrgans } from '../api/organs.js';
 
 // Weight sliders: key, label, colour (06 Stage 3; the fourth slider is Waiting Time).
@@ -52,11 +54,12 @@ const organLabel = (o) => {
   return `${o.id} (${o.organType}, ${o.bloodGroup})${suffix}`;
 };
 
+const ACTIVE_OFFER_TOOLTIP = 'This organ already has an active offer';
+const DECLINED_TOOLTIP = 'This recipient has already declined this organ';
+
 const fmtScore = (n) => (n === null || n === undefined ? '—' : Number(n).toFixed(1));
 
 export default function MatchingConsolePage() {
-  const navigate = useNavigate();
-
   const [organs, setOrgans] = useState([]);
   const [organsLoading, setOrgansLoading] = useState(true);
   const [selectedKey, setSelectedKey] = useState(null);
@@ -65,6 +68,7 @@ export default function MatchingConsolePage() {
   const [isComputing, setIsComputing] = useState(false);
   const [runLoading, setRunLoading] = useState(false);
   const [reviewCandidate, setReviewCandidate] = useState(null);
+  const [creatingFor, setCreatingFor] = useState(null);
   // Ignores responses for an organ that is no longer selected.
   const selectionToken = useRef(0);
 
@@ -101,8 +105,9 @@ export default function MatchingConsolePage() {
       })
       .catch((err) => token === selectionToken.current && showApiError(err, 'Could not load matching data'))
       .finally(() => token === selectionToken.current && setRunLoading(false));
-    // selectedOrgan changes only when the selection or the organ list does.
-  }, [selectedOrgan]);
+    // Keyed on the selection: refreshing the organ list after an offer must not reset weights or run.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedKey]);
 
   const totalWeight = weights.hla + weights.urgency + weights.distance + weights.wait;
   const canRun = !!selectedOrgan && isMatchable(selectedOrgan) && totalWeight > 0 && !isComputing;
@@ -121,9 +126,33 @@ export default function MatchingConsolePage() {
     }
   }, [selectedOrgan, weights]);
 
-  function handleCreateOffer(recipient) {
-    if (!selectedOrgan) return;
-    navigate('/offers', { state: { organId: selectedOrgan.id, recipientId: recipient } });
+  // Why Create Offer is disabled for a candidate, or null when it is allowed (07 §6).
+  const offerBlockReason = (candidate) => {
+    if (selectedOrgan?.hasActiveOffer) return ACTIVE_OFFER_TOOLTIP;
+    if (candidate.offerStatus === 'DECLINED') return DECLINED_TOOLTIP;
+    return null;
+  };
+
+  async function handleCreateOffer(candidate) {
+    if (!selectedOrgan || !run) return;
+    setCreatingFor(candidate.key);
+    try {
+      const offer = await createOffer({ organ: selectedOrgan, candidate, run });
+      notifications.show({
+        title: 'Offer created',
+        message: `${offer.id} created for ${candidate.recipient} (rank ${candidate.rank})`,
+        color: 'green',
+      });
+      setRun((r) =>
+        r && { ...r, qualified: r.qualified.map((q) => (q.key === candidate.key ? { ...q, offerStatus: offer.status } : q)) },
+      );
+    } catch (err) {
+      showApiError(err, 'Could not create offer');
+    } finally {
+      setCreatingFor(null);
+      // Success or failure (e.g. 409 on a stale view), re-read the organs so the button state is current.
+      listOrgans().then(setOrgans).catch(() => {});
+    }
   }
 
   const organOptions = useMemo(
@@ -431,16 +460,21 @@ export default function MatchingConsolePage() {
                       Review →
                     </Button>
 
-                    {item.rank === 1 ? (
-                      <Button
-                        size="xs"
-                        color="var(--color-primary)"
-                        onClick={() => handleCreateOffer(item.recipient)}
-                        leftSection={<IconUserCheck size={14} />}
-                      >
-                        Create Offer
-                      </Button>
-                    ) : null}
+                    <Tooltip label={offerBlockReason(item)} disabled={!offerBlockReason(item)} withArrow>
+                      {/* The wrapper receives hover; a disabled button does not. */}
+                      <span>
+                        <Button
+                          size="xs"
+                          color="var(--color-primary)"
+                          onClick={() => handleCreateOffer(item)}
+                          loading={creatingFor === item.key}
+                          disabled={!!offerBlockReason(item) || creatingFor !== null}
+                          leftSection={<IconUserCheck size={14} />}
+                        >
+                          Create Offer
+                        </Button>
+                      </span>
+                    </Tooltip>
                   </div>
                 </article>
               ))}
@@ -568,17 +602,22 @@ export default function MatchingConsolePage() {
               <Button variant="default" onClick={() => setReviewCandidate(null)}>
                 Close
               </Button>
-              <Button
-                color="var(--color-primary)"
-                onClick={() => {
-                  const r = reviewCandidate.recipient;
-                  setReviewCandidate(null);
-                  handleCreateOffer(r);
-                }}
-                leftSection={<IconUserCheck size={16} />}
-              >
-                Create Offer for {reviewCandidate.recipient}
-              </Button>
+              <Tooltip label={offerBlockReason(reviewCandidate)} disabled={!offerBlockReason(reviewCandidate)} withArrow>
+                <span>
+                  <Button
+                    color="var(--color-primary)"
+                    disabled={!!offerBlockReason(reviewCandidate) || creatingFor !== null}
+                    onClick={() => {
+                      const c = reviewCandidate;
+                      setReviewCandidate(null);
+                      handleCreateOffer(c);
+                    }}
+                    leftSection={<IconUserCheck size={16} />}
+                  >
+                    Create Offer for {reviewCandidate.recipient}
+                  </Button>
+                </span>
+              </Tooltip>
             </Group>
           </Stack>
         </Modal>

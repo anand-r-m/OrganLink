@@ -701,6 +701,33 @@ These tasks are independent once Phases 1 and 2 are done. OL-DEC-03 tags each on
 - Demo steps:
   - Click Export Audit PDF and open the file to show the live offers.
 
+### OL-029 — Manual interactive QA pass
+
+- Phase: 3
+- Owner: TBA (whole team)
+- Dependencies: completion of the Phase 2 and Phase 3 UI tasks (OL-010 to OL-028)
+- Scope: Run the app in live mode and walk through every browser check that earlier tasks deferred.
+  - Read `MANUAL_QA_CHECKLIST.md` and the "Manual interactive checks" section of every `OL-0xx-REPORT.md`.
+  - Compile one consolidated browser QA checklist (page/route, exact action, expected result).
+  - Start the API and the Vite app with `VITE_DATA_SOURCE=api` against a reset local development DB.
+  - Walk through every checklist item in a browser and record pass or fail.
+  - Fix only small, local UI defects. Anything that needs a contract, schema or product change is recorded as a finding and added to this backlog first.
+  - Log findings in `LESSONS_LEARNED.md`.
+  - Produce `OL-029-REPORT.md`.
+- Acceptance criteria:
+  - Every item on the consolidated checklist has a recorded pass or fail, with a note for each fail.
+  - Every check marked "Deferred to manual QA pass (OL-029)" in an earlier report is covered, including OL-015 checks 2, 3, 9 and 10.
+  - Each small fix is retested, and the unit and API suites still pass.
+  - Mock mode still loads every page.
+- Required tests:
+  - DB tests: n/a
+  - API tests: re-run the existing server suite after any fix.
+  - UI checks: the walkthrough itself, in a real browser.
+- Files likely affected:
+  - `docs/implementation/OL-029-REPORT.md`, `docs/implementation/LESSONS_LEARNED.md`, `docs/implementation/MANUAL_QA_CHECKLIST.md`, plus small UI fixes under `src/`
+- Demo steps:
+  - Show the completed checklist with its pass/fail results.
+
 ---
 
 ## Phase 4: Hardening
@@ -793,7 +820,7 @@ These tasks are independent once Phases 1 and 2 are done. OL-DEC-03 tags each on
 
 - Phase: 4
 - Owner: TBA (whole team)
-- Dependencies: OL-030, OL-031, OL-032, OL-033, OL-DEC-03
+- Dependencies: OL-029, OL-030, OL-031, OL-032, OL-033, OL-DEC-03
 - Scope: Produce the submission dump with `pg_dump organlink > submission/organlink.sql` after a fresh reset and seed (05 §9). Rehearse the demo script:
   1. login
   2. procure

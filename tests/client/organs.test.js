@@ -33,7 +33,8 @@ test('mock mode uses mockOrgans, with upper-case statuses; expired stays listed'
   const rows = await listOrgans({}, false)
   assert.equal(rows.length, mockOrgans.length)
   assert.ok(rows.some((r) => r.status === 'EXPIRED' && r.isExpired))
-  assert.deepEqual(rows[0], adaptMockOrgan(mockOrgans[0]))
+  // Mock mode now reports open offers from the mock offer store (OL-015); everything else is unchanged.
+  assert.deepEqual({ ...rows[0], hasActiveOffer: false }, adaptMockOrgan(mockOrgans[0]))
   const avail = await listOrgans({ available: true }, false)
   assert.ok(avail.length > 0 && avail.every((r) => r.status === 'AVAILABLE'))
 })
