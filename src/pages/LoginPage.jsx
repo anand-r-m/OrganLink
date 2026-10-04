@@ -6,7 +6,7 @@ import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 
 export default function LoginPage() {
-  const { isAuthenticated, login } = useAuth();
+  const { isAuthenticated, isLoading, login } = useAuth();
   const navigate = useNavigate();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -23,11 +23,15 @@ export default function LoginPage() {
     };
   }, []);
 
+  if (isLoading) {
+    return null;
+  }
+
   if (isAuthenticated) {
     return <Navigate to="/dashboard" replace />;
   }
 
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault();
 
     // Clear previous shake state
@@ -36,7 +40,14 @@ export default function LoginPage() {
     }
     setIsShaking(false);
 
-    if (login(username, password)) {
+    let ok = false;
+    try {
+      ok = await login(username, password);
+    } catch {
+      setError('Unable to reach the server');
+      return;
+    }
+    if (ok) {
       setError('');
       navigate('/dashboard', { replace: true });
       return;

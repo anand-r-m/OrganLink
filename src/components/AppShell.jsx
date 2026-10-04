@@ -54,8 +54,12 @@ function SidebarLink({ item }) {
 }
 
 export default function AppShell() {
-  const { isAuthenticated, logout } = useAuth();
+  const { isAuthenticated, isLoading, logout } = useAuth();
   const location = useLocation();
+
+  if (isLoading) {
+    return null; // live mode: waiting for /api/auth/me
+  }
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;

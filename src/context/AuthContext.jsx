@@ -1,4 +1,6 @@
-import { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+
+import { USE_LIVE_API, apiFetch } from '../api/client.js';
 
 const STORAGE_KEY = 'organlink.auth';
 
@@ -17,9 +19,34 @@ function readStoredAuth() {
 }
 
 export function AuthProvider({ children }) {
-  const [isAuthenticated, setIsAuthenticated] = useState(readStoredAuth);
+  // Mock mode: hardcoded admin/admin + localStorage flag. Live mode: server session, restored via /me.
+  const [isAuthenticated, setIsAuthenticated] = useState(USE_LIVE_API ? false : readStoredAuth);
+  const [isLoading, setIsLoading] = useState(USE_LIVE_API);
 
-  const login = useCallback((username, password) => {
+  useEffect(() => {
+    if (!USE_LIVE_API) return undefined;
+    let cancelled = false;
+    apiFetch('/auth/me')
+      .then(() => !cancelled && setIsAuthenticated(true))
+      .catch(() => !cancelled && setIsAuthenticated(false))
+      .finally(() => !cancelled && setIsLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Resolves true on success, false on bad credentials; other failures (network, 5xx) reject.
+  const login = useCallback(async (username, password) => {
+    if (USE_LIVE_API) {
+      try {
+        await apiFetch('/auth/login', { method: 'POST', body: { username, password } });
+      } catch (err) {
+        if (err.status === 401 || err.status === 400) return false;
+        throw err;
+      }
+      setIsAuthenticated(true);
+      return true;
+    }
     if (username !== VALID_USERNAME || password !== VALID_PASSWORD) {
       return false;
     }
@@ -33,6 +60,12 @@ export function AuthProvider({ children }) {
   }, []);
 
   const logout = useCallback(() => {
+    if (USE_LIVE_API) {
+      // Clear local state even if the server call fails (e.g. session already expired).
+      apiFetch('/auth/logout', { method: 'POST' }).catch(() => {});
+      setIsAuthenticated(false);
+      return;
+    }
     try {
       window.localStorage.removeItem(STORAGE_KEY);
     } catch {
@@ -42,8 +75,8 @@ export function AuthProvider({ children }) {
   }, []);
 
   const value = useMemo(
-    () => ({ isAuthenticated, login, logout }),
-    [isAuthenticated, login, logout],
+    () => ({ isAuthenticated, isLoading, login, logout }),
+    [isAuthenticated, isLoading, login, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
