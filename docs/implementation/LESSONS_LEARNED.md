@@ -185,3 +185,15 @@ No failures or debugging cycles.
 - The new server tests passed on the first run. They clone an AVAILABLE organ per scenario (INSERT ... SELECT) so accepting or expiring never leaves a seeded organ ALLOCATED or EXPIRED; EXPIRED organs cannot be reverted (only DISCARDED), so reusing a seeded organ for the expiry test would have damaged the demo data. Cleanup deletes the clones' transport, offers, runs and organs.
 - Skipping a prior decliner in Advance needs a test-only direct INSERT of a DECLINED offer, because the API cannot create a second DECLINED offer for a rank without walking through Advance.
 - New lint warning (`setRecipients` unused after the mock accept stopped marking recipients Transplanted) fixed in the same task.
+
+## OL-017
+
+### No Postgres running and no `.env` at the start
+- **Symptom:** `pg_isready` reported "no response" on localhost:5432 and there was no `.env` (only `.env.example`), so `DATABASE_URL` was unset. There was no `organlink` database either.
+- **Root cause:** the Homebrew `postgresql@18` service was stopped, and `.env` is gitignored so it is not in a fresh checkout.
+- **Fix:** `brew services start postgresql@18`, `cp .env.example .env` (the example holds only local, non-secret values), then `npm run db:reset -- --yes`. The reset created the `organlink` DB on the local server; nothing else was touched.
+- **Prevent/detect:** run `pg_isready` and `ls .env` before anything else. The OL-033 README should list "start Postgres, copy `.env.example` to `.env`, `npm run db:reset`".
+
+### Notes (no other failures)
+- The transport tests passed on the first run. Same-hospital accepts create a DELIVERED transport immediately, so the tests pick a candidate whose hospital differs from the organ's recovering hospital; otherwise there is no PENDING row to test.
+- Transport `FAILED` and `ALLOCATED` organ expiry are not exercised: OL-DEC-02 (A) records them as a known limitation.

@@ -1,8 +1,7 @@
 import { useMemo } from 'react';
 import { CircleMarker, MapContainer, Polyline, Popup, TileLayer } from 'react-leaflet';
 
-import { mockHospitals } from '../data/mockHospitals.js';
-import { mockTransports } from '../data/mockTransports.js';
+import { hospitalMarkers } from '../api/adapters/transport.js';
 import './TransportMap.css';
 
 const MAP_CENTER = [20.5, 78.9];
@@ -10,18 +9,9 @@ const MAP_ZOOM = 5;
 const TILE_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
 
 function getRouteClassName(status) {
-  if (status === 'Delivered') return 'transport-route--delivered';
-  if (status === 'Expired') return 'transport-route--expired';
+  if (status === 'DELIVERED') return 'transport-route--delivered';
+  if (status === 'FAILED') return 'transport-route--expired';
   return 'transport-route--active';
-}
-
-function countActiveTransports(hospitalName) {
-  return mockTransports.filter(
-    (transport) =>
-      (transport.originHospital === hospitalName ||
-        transport.destHospital === hospitalName) &&
-      (transport.status === 'In Transit' || transport.status === 'Preparing'),
-  ).length;
 }
 
 function hasRouteCoords(transport) {
@@ -33,20 +23,14 @@ function hasRouteCoords(transport) {
   );
 }
 
-export default function TransportMap() {
-  const routes = useMemo(
-    () => mockTransports.filter(hasRouteCoords),
-    [],
-  );
+// Draws one line per transport and a marker for every origin/destination hospital.
+export default function TransportMap({ transports = [] }) {
+  const routes = useMemo(() => transports.filter(hasRouteCoords), [transports]);
+  const markers = useMemo(() => hospitalMarkers(routes), [routes]);
 
   return (
     <section className="transport-map-card neu-raised" aria-label="Transport map">
-      <MapContainer
-        center={MAP_CENTER}
-        zoom={MAP_ZOOM}
-        className="transport-map"
-        scrollWheelZoom
-      >
+      <MapContainer center={MAP_CENTER} zoom={MAP_ZOOM} className="transport-map" scrollWheelZoom>
         <TileLayer url={TILE_URL} />
         {routes.map((transport) => (
           <Polyline
@@ -59,17 +43,19 @@ export default function TransportMap() {
             }}
           />
         ))}
-        {mockHospitals.map((hospital) => (
+        {markers.map((m) => (
           <CircleMarker
-            key={hospital.id}
-            center={[hospital.lat, hospital.lng]}
+            key={m.key}
+            center={m.position}
             radius={8}
             pathOptions={{ className: 'transport-hospital-marker' }}
           >
             <Popup>
-              <strong>{hospital.name}</strong>
+              <strong>{m.name}</strong>
               <br />
-              Active transports: {countActiveTransports(hospital.name)}
+              Origin of {m.origins} · Destination of {m.destinations}
+              <br />
+              Active transports: {m.active}
             </Popup>
           </CircleMarker>
         ))}
