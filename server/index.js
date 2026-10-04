@@ -1,6 +1,7 @@
 import { pathToFileURL } from 'node:url'
 import express from 'express'
 import { pool } from './db.js'
+import { errorHandler } from './errors.js'
 
 const PORT = Number(process.env.PORT) || 3001
 
@@ -19,6 +20,9 @@ app.get('/api/health', async (_req, res) => {
     })
   }
 })
+
+// Must stay after all routes.
+app.use(errorHandler)
 
 // Listen only when run directly, so tests can import `app` without binding a port.
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
