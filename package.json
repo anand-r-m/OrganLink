@@ -4,9 +4,12 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently -k -n web,api -c cyan,green \"vite\" \"npm:dev:server\"",
+    "dev:web": "vite",
+    "dev:server": "node --watch server/index.js",
     "build": "vite build",
     "lint": "oxlint",
+    "test:server": "node --test tests/server/*.test.js",
     "preview": "vite preview",
     "db:reset": "bash scripts/db-reset.sh"
   },
@@ -17,10 +20,13 @@
     "@mantine/notifications": "^7.17.8",
     "@tabler/icons-react": "^3.46.0",
     "dayjs": "^1.11.21",
+    "dotenv": "^18.0.5",
+    "express": "^4.22.3",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",
     "leaflet": "^1.9.4",
     "mantine-react-table": "^2.0.0-beta.9",
+    "pg": "^8.23.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-leaflet": "^5.0.0",
@@ -32,6 +38,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.4",
     "bcryptjs": "^3.0.3",
+    "concurrently": "^10.0.5",
     "oxlint": "^1.75.0",
     "vite": "^8.2.0"
   }
