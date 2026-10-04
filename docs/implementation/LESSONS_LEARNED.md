@@ -50,3 +50,21 @@
 - **Symptom (caught in review, not by a test):** the Regions tab counts hospitals by mock region names ("North"); sharing the live hospital state would have made every count 0.
 - **Fix:** the Regions tab keeps `mockHospitals` in live mode until OL-024.
 - **Prevent/detect:** when lifting a mock state to live data, grep for other consumers of that state.
+
+## OL-006
+
+### No Postgres running at task start (again)
+- **Symptom:** `pg_isready` showed nothing on 5432 or 5433.
+- **Root cause:** the previous throwaway cluster was stopped; no persistent server is configured.
+- **Fix:** new throwaway cluster in the session scratchpad on :5433 with `LC_ALL=en_US.UTF-8` and `-k /tmp/ol6sock`; `DATABASE_URL` passed via the environment only (`.env` untouched). Started first time.
+- **Prevent/detect:** the "start local test DB" README snippet (OL-033) would remove this repeated setup.
+
+### `WITH ORDINALITY` does not work on a VALUES list
+- **Symptom:** `db:reset` failed in `03_seed_demo.sql` with `syntax error at or near "WITH"`. Without ordering, hospital IDs (and organ IDs) came out in join order, not list order (Heart was organ 3, AIIMS was not hospital 1).
+- **Root cause:** `WITH ORDINALITY` is only valid after a function call in FROM. I then fixed it with a regex rewrite whose non-greedy match spanned several statements and wrapped the wrong `VALUES` blocks, which gave a second syntax error.
+- **Fix:** `FROM (SELECT x.*, row_number() OVER () AS n FROM (VALUES …) AS x(cols)) AS v … ORDER BY v.n`, applied to the four inserts that need stable IDs; repaired the mis-wrapped blocks by hand.
+- **Prevent/detect:** run `db:reset` after every edit to the seed. Edit SQL blocks one at a time rather than with a multi-statement regex. Note that BSD `sed -i` needs `-i ''` on macOS.
+
+### Seed-dependent assumptions in later tasks
+- **Symptom (design note):** IDs are now deterministic after reset (Heart = organ 1, Liver = 2, Kidney = 3; AIIMS = hospital 1), but only because of `row_number()` ordering in the seed.
+- **Prevent/detect:** tests for later tasks should look rows up by name or type, not hard-code IDs.
