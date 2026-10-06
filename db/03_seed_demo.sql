@@ -484,7 +484,7 @@ scored AS (
 )
 SELECT s.run_id, s.recipient_id,
        CASE WHEN s.exclusion_code IS NULL
-            THEN RANK() OVER (PARTITION BY (s.exclusion_code IS NULL)
+            THEN ROW_NUMBER() OVER (PARTITION BY s.run_id
                               ORDER BY s.match_score DESC, s.wait_score DESC)
        END,
        CASE WHEN s.exclusion_code IS NULL THEN s.match_score END,

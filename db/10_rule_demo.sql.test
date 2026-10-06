@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# Assertion harness for db/10_rule_demo.sql (OL-032).
+#
+# Runs the business-rule demonstration and fails unless it prints exactly
+# one "BR-n PASS" line for every n in 1..14, no "BR-n FAIL" line at all,
+# and psql exits 0. The script raises an exception of its own when a rule
+# fails or a result is missing, so a non-zero psql exit is also a failure.
+#
+# The demonstration runs in a single transaction that is rolled back, so
+# this harness changes nothing in the database and can be re-run at will.
+#
+# Connection: DATABASE_URL, or the local `organlink` database when unset.
+# Usage: npm run db:rules
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if [[ -f "$ROOT/.env" && -z "${DATABASE_URL:-}" ]]; then
+  DATABASE_URL="$(grep -E '^DATABASE_URL=' "$ROOT/.env" | head -1 | cut -d= -f2- || true)"
+fi
+TARGET="${DATABASE_URL:-organlink}"
+
+if [[ -n "${PSQL:-}" ]]; then
+  PSQL_BIN="$PSQL"
+elif command -v psql >/dev/null 2>&1; then
+  PSQL_BIN="psql"
+else
+  echo "db:rules: psql not found on PATH. Add the PostgreSQL bin directory to PATH or set PSQL=/path/to/psql" >&2
+  exit 2
+fi
+
+echo "db:rules: running db/10_rule_demo.sql against ${TARGET%%\?*}"
+set +e
+OUT="$("$PSQL_BIN" -X -v ON_ERROR_STOP=1 -d "$TARGET" -f "$ROOT/db/10_rule_demo.sql" 2>&1)"
+RC=$?
+set -e
+printf '%s\n' "$OUT"
+
+status=0
+if [[ "$RC" -ne 0 ]]; then
+  echo "db:rules: FAILED - psql exited $RC" >&2
+  status=1
+fi
+
+count_lines() { printf '%s\n' "$OUT" | grep -cE "$1" || true; }
+
+pass_total="$(count_lines 'BR-[0-9]+ PASS')"
+fail_total="$(count_lines 'BR-[0-9]+ FAIL')"
+
+if [[ "$fail_total" -ne 0 ]]; then
+  echo "db:rules: FAILED - $fail_total FAIL line(s) present" >&2
+  status=1
+fi
+if [[ "$pass_total" -ne 14 ]]; then
+  echo "db:rules: FAILED - expected 14 PASS lines, found $pass_total" >&2
+  status=1
+fi
+
+for n in $(seq 1 14); do
+  c="$(count_lines "BR-$n PASS")"
+  if [[ "$c" -ne 1 ]]; then
+    echo "db:rules: FAILED - BR-$n PASS appeared $c time(s), expected exactly 1" >&2
+    status=1
+  fi
+done
+
+if [[ "$status" -eq 0 ]]; then
+  echo "db:rules: OK - 14 of 14 business rules passed, transaction rolled back, no rows persisted"
+fi
+exit "$status"

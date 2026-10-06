@@ -370,3 +370,32 @@ No failures or debugging cycles.
 ### Windows environment gotchas hit this cycle
 - `psql` is not on `PATH`; PostgreSQL 18 lives in `/c/Program Files/PostgreSQL/18/bin`. `scripts/db-reset.sh` calls `psql` by name, so prepend that directory.
 - Unlike OL-030 there was no bundled Node runtime this time — no `node`, no `npm`, only `bun` 1.4.2 — so `npm run db:reset`, `test:server` and `smoke` could not start at all. A portable Node v24.21.0 win-x64 zip and `jq.exe` (required by `smoke-flow.sh`) were extracted into the pre-approved temp directory and put on `PATH`, leaving the repo untouched.
+
+## OL-032
+
+### A top-level RAISE NOTICE aborts psql under ON_ERROR_STOP
+- **Symptom:** the original script died on its first `RAISE NOTICE` line with a nonzero psql exit, before any rule ran.
+- **Root cause:** `RAISE` is a PL/pgSQL statement, not SQL. Outside a DO block psql sends it to PostgreSQL as ordinary SQL, gets a syntax error, and `-v ON_ERROR_STOP=1` turns that into a nonzero exit before any rule runs.
+- **Fix:** the only statements outside DO blocks are `BEGIN`, `SET LOCAL`, `\set`/`\echo`, `SELECT` and `ROLLBACK`. All notices are raised from inside DO blocks. **Prevent:** psql scripts may only contain SQL and psql meta-commands at the top level — never bare PL/pgSQL statements.
+
+### psql does not substitute `:variables` inside dollar-quoted bodies
+- **Symptom:** every DO block that referenced `:something` failed at runtime with an unquoted-identifier or syntax error, and the error text pointed nowhere near the cause.
+- **Root cause:** psql's variable interpolation skips quoted regions, and a dollar-quoted body counts as one — the `:name` form reaches PostgreSQL literally and is parsed as a cast/identifier, not as a psql variable.
+- **Fix:** no `:vars` inside any `$$ ... $$` body. Ids are resolved with plain SQL subqueries; fixtures shared between blocks are passed through a temp `br_state(k, v)` table. **Prevent:** treat dollar-quoted bodies as un-substitutable; if a value must enter one, select it into a temp table first.
+
+### Emit PASS/FAIL at the end, sorted, from a result table — not inline
+- **Symptom:** the first passing run printed its 14 lines in block order, not BR-1..BR-14, and each block printed before its own failure path could be evaluated.
+- **Root cause:** notices raised where the work happens are ordered by execution flow, and a block that exits through an exception handler never reaches its success notice.
+- **Fix:** each block writes exactly one row into `br_results(rule_no, ok, detail)` — body path or exception path — and a final DO block emits `RAISE NOTICE 'BR-% %: %'` ordered by `rule_no`, followed by a gate that raises unless there are 14 rows with 0 failures. **Prevent:** a script whose acceptance criterion is "14 PASS lines" must generate those lines from persisted per-rule rows, so the count is structural rather than incidental.
+
+### A demo harness that cannot fail tests nothing
+- **Symptom:** `db/10_rule_demo.sql.test` contained only `\echo 'BR-n PASS'` lines — it asserted nothing and would exit 0 even if the demo crashed.
+- **Fix:** the harness now runs the demo under `psql -X -v ON_ERROR_STOP=1`, requires exit 0, requires exactly 14 `BR-n PASS` lines (one each for n=1..14) and zero `BR-n FAIL`. **Prevent:** falsifiability was proven by mutation — flipping BR-8's assertion produced `BR-8 FAIL`, the gate's `ERROR: rule demo failed: 1 of 14`, and harness exit 1 with `found 13`. Any assertion-only deliverable gets one deliberate mutation before it is trusted.
+
+### Rollback is the cheapest idempotency guarantee
+- **Fix:** the whole demo runs in one transaction ending in `ROLLBACK`. Two consecutive runs on the live seeded DB were both green, and nine table counts (hospital, donor, recipient, waitlist_entry, organ, organ_offer, match_run, transplant_event, audit_log) were byte-identical before and after. **Prevent:** when a demo must not touch the database, prefer a rolled-back transaction over cleanup statements — cleanup that can itself fail leaves residue.
+
+### Distinguishing "the rule demo failed" from "the seed aged out"
+- **Symptom:** `npm run test:server` reported 6 failures (175/181) in the same cycle the demo went green.
+- **Root cause:** all six are seed-age drift — the suite documents "Needs DATABASE_URL pointing at a freshly reset dev DB", the seed was ~11.5 h old, and Heart (6 h) / Liver (12 h) viability windows plus the 3 h `HIST`/audit cutoffs had elapsed. Earlier the same cycle, at ~5 h, the same suite was 177/181.
+- **Prevent:** before attributing a suite failure to a change, check the age assumptions in the failing test's own header. The remediation (`npm run db:reset`) is destructive and needs explicit approval — recording it as a risk is correct; running it silently is not.
