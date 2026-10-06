@@ -303,3 +303,31 @@ No failures or debugging cycles.
 ### Parallel implementers on a shared DB
 - OL-027 (server + dashboard) and OL-028 (client-only) ran at the same time, with disjoint files. OL-028 was barred from server tests and DB commands. It worked, and the build break above was caught precisely because the other agent ran the build.
 - OL-027 checker note: back-dating `sent_at` can violate `ck_offer_time_order`, because `sent_at` may not precede `created_at`. To test "offer close to expiry", rely on a short response window (Heart is 1 h) or back-date `created_at` too.
+
+## OL-030
+
+### Delegation was unavailable; the orchestrator implemented directly
+- **Symptom:** `task(subagent_type: 'fixer', ...)` failed twice with `Model not found: openai/gpt-6-luna. Did you mean: gpt-6-luna, gpt-6-luna-pro, gpt-6-luna-fast?`.
+- **Handling:** the retry with an identical prompt failed the same way, so the work was implemented in the orchestrator instead of retrying a third time. **Prevent:** treat a repeated `Model not found` as a hard infrastructure failure rather than a prompt problem, and re-plan the lane rather than re-issuing it.
+
+### Seed data cannot satisfy a 10-recipient concurrency proof
+- **Symptom:** before writing the harness, the obvious approach — pick a donor/organ-type pair and reuse seeded waitlist entries — looked sufficient but was not.
+- **Root cause:** the maximum number of currently-eligible recipients for *any* donor/organ-type pair in the seed is **8** (Kidney has the most ACTIVE waitlist entries). OL-030 demands 10 distinct eligible recipients, so the seed can never satisfy it as-is.
+- **Fix:** `scripts/concurrency.mjs` reuses the eligible seeded recipients and tops the set up through `POST /api/recipients`; it creates only the shortfall. The test builds all 10 with direct SQL. **Prevent:** before relying on seed data for a count-based criterion, query the actual maximum. Counts in `03_seed_demo.sql` are not guarantees.
+
+### Matching the donor's blood group and weight makes every fixture eligible
+- Two facts make provisioning trivial and should be reused: all 8 blood-group self-pairs are compatible in `blood_compatibility`, and Kidney's ratio band is 0.50–3.00. Creating recipients with the donor's own blood group and weight yields ratio 1.0, always inside the band. Using Kidney (30 h viability, 6 h response window) also stops `expire_stale_offers()` from expiring fixtures mid-run.
+
+### A14 was observed, and the sweep is the reason
+- `withTx(..., { sweep: true })` runs `SELECT expire_stale_offers()` on the pool **before** the transaction opens, and that function has no `SKIP LOCKED`. Ten parallel creates took 201 ms wall clock: fastest request 26 ms, median 176 ms, slowest 200 ms. The losers queued behind `FOR UPDATE` on the organ and behind the sweeping `UPDATE`s.
+- This is correct behaviour, not a defect: one 201, nine `409 ACTIVE_OFFER_EXISTS`, one transport row, no deadlock, no timeout. The script now prints the min/median/max spread and an explicit observed/not-observed line instead of hiding it. **Prevent:** 05 §4.3 claims the sweep uses `SKIP LOCKED`; it does not. Treat the docs as wrong and record the measurement.
+
+### Windows environment gotchas hit this cycle
+- `npm` is not on `PATH`. Node v24.19.0 lives at `~/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node.exe`; `bun` provides the packages. Run `node` directly and use `./node_modules/.bin/` for `oxlint` and `vite build`.
+- Git Bash `/tmp/x.json` paths handed to Windows Node resolve to `C:\tmp\x.json` and fail with `ENOENT`. Use `node:os` `tmpdir()` or keep everything in memory.
+- `POST /api/donors/:id/organs` rejects a future `recoveredAt` with `ck_organ_not_future`. Always `new Date().toISOString()`.
+- `bun install` writes `bun.lock`, but the repo tracks `package-lock.json`. Remove the stray `bun.lock` after installing so the diff stays clean.
+
+### Assertion design
+- The two phases share the winning offer id, and `node:test` does not pass one test's return value to the next. They are nested subtests of one parent `test` with a closure variable, which also makes the ordering requirement explicit instead of relying on file order. **Prevent:** when test phases depend on earlier phases' output, share it via closure and assert the dependency.
+- Every assertion was checked for falsifiability: exactly 1x201, exactly 9x409 with `error.code === 'ACTIVE_OFFER_EXISTS'`, `count(*) ... IN ('CREATED','SENT','ACCEPTED') = 1`, `transport_record` count = 1, organ `ALLOCATED`. A bare "status is 201 or 409" would have passed even if the invariants were wrong.
