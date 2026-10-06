@@ -123,3 +123,49 @@ A8 (admin hash): The hash in docs/context/02_seed_reference-2.sql was incorrect.
   - *Also MUST:* Recipients and waitlist (OL-021, OL-022), donor create/update (OL-020), and organ discard (OL-023), since the demo reads and edits these records.
   - *STRETCH (may stay mock behind `VITE_DATA_SOURCE`):* Settings (OL-024, OL-025), Reports (OL-026), Dashboard (OL-027), and Audit PDF (OL-028). Aim for all-live if time allows.
   - *Consequence:* the rehearsal script (OL-034) and README (OL-033) must mark which pages are live and which are mock.
+
+---
+
+## Final status recorded at OL-033 (documentation and run instructions)
+
+### Decision gate outcomes
+
+Every `OL-DEC` entry in `BACKLOG.md` has a recorded outcome; none is open.
+
+| Decision | Outcome | Resolved | Where the outcome lives |
+|---|---|---|---|
+| OL-DEC-01 — API response shape strategy | **Option B**: schema-shaped camelCase JSON + frontend adapters | 2026-10-04 | this file (above); `API_CONTRACT.md` banner; implemented as `src/api/adapters/*.js` (OL-005 onward) |
+| OL-DEC-02 — in-transit expiry handling | **Option A**: documented limitation; schema unchanged; no OL-001b | 2026-10-04 | this file (above); `API_CONTRACT.md` banner; no viability check in `server/routes/transport.js` (deliver) or `server/routes/transplants.js`; demo avoids the path |
+| OL-DEC-03 — demo bar (all-live vs mixed) | **Option B**: mixed; core allocation flow MUST be live, Settings/Reports/Dashboard/Audit PDF STRETCH with mock fallback | 2026-10-04 | this file (above); `BACKLOG.md` Phase 3 tagging; `README.md` → "Which pages are live, per OL-DEC-03" |
+
+### Assumption status
+
+A1–A17 stand as written in the table above. Status of the ones implementation consumed:
+
+| ID | Final status |
+|---|---|
+| A1 | Implemented in `server/db.js` (`set_config('app.user_id', …, true)`); asserted by `tests/server/tx-errors.test.js`. |
+| A2 | Implemented as conditional updates in the offer/transport routes (OL-015 to OL-017). |
+| A3 | Implemented: `hospitalId` optional, defaults to the transport's destination (OL-018). |
+| A4 | Implemented as the advance walker in `server/routes/offers.js` (OL-016). |
+| A5 | **Adopted as proposed:** `GET /api/lookups` shipped in OL-005 and is the only lookup source in live mode. The "Proposed — needs approval" note above is superseded by its implementation and use. |
+| A8 | Resolved by OL-001: the admin hash in `docs/context/02_seed_reference-2.sql` was wrong; `db/02_seed_reference.sql` carries a corrected hash (see note above). |
+| A9, A11, A12 | Implemented in OL-006, the adapters, and `server/db.js` respectively. |
+| A13 | Followed: OL-001 ran `09_verification_tests.sql` on a fresh DB, then reset again. |
+| A14 | **Observed and accepted (OL-030):** the sweep has no `SKIP LOCKED`; 10 parallel creates queued behind `FOR UPDATE`/the sweep's UPDATEs with no deadlock and no timeout (~200 ms at demo scale). No code change. Documented in `README.md` → "Known limitations". |
+| A16 | Cosmetic owner suggestions only; `BACKLOG.md` still says TBA. |
+| A17 | Implemented in OL-023 (`server/routes/organs.js`): discard requires no open offer, AVAILABLE/EXPIRED only. |
+
+No assumption was retracted or rewritten during implementation. Changing one still means
+editing its row in the table above.
+
+### Open items at OL-033
+
+- `GET /api/reports/audit.pdf` stays "specified, deferred" (A6); the client-side jsPDF
+  generator is the shipped path (OL-028).
+- OL-029 (manual interactive QA pass) has not run yet; browser checks deferred by earlier
+  reports are listed in `MANUAL_QA_CHECKLIST.md` and in each report's
+  "Manual interactive checks" section.
+- The OL-DEC-02 Option A limitation (allocated organs never expire in transit) is a
+  permanent, accepted gap for this submission; it is documented in `README.md` →
+  "Known limitations and assumptions" and in `API_CONTRACT.md`.

@@ -399,3 +399,21 @@ No failures or debugging cycles.
 - **Symptom:** `npm run test:server` reported 6 failures (175/181) in the same cycle the demo went green.
 - **Root cause:** all six are seed-age drift — the suite documents "Needs DATABASE_URL pointing at a freshly reset dev DB", the seed was ~11.5 h old, and Heart (6 h) / Liver (12 h) viability windows plus the 3 h `HIST`/audit cutoffs had elapsed. Earlier the same cycle, at ~5 h, the same suite was 177/181.
 - **Prevent:** before attributing a suite failure to a change, check the age assumptions in the failing test's own header. The remediation (`npm run db:reset`) is destructive and needs explicit approval — recording it as a risk is correct; running it silently is not.
+
+## OL-033
+
+### `smoke` needs jq, which no install step in this repo has ever provided
+- **Symptom:** `npm run smoke` aborts immediately with `smoke: jq is required` (exit 2). `command -v jq` returned nothing, and no `jq.exe` existed under the usual installer locations (scoop, choco, winget, msys64, Program Files) — only a stale note in an earlier report that jq had once been on PATH.
+- **Root cause:** `scripts/smoke-flow.sh` (OL-019) declares jq as a prerequisite, but jq was present in earlier environments by coincidence; neither `package.json` nor the old one-line README ever installed or mentioned it. OL-033 is the first task that had to make the documented commands work from scratch.
+- **Fix:** downloaded the official `jq-1.7.1` Windows binary to `~/bin/jq.exe` — a directory already on `PATH` — leaving the repo untouched; the file can be removed to reverse it. The README prerequisites table now lists `jq` (and `curl`, `bash`, `psql`) so the next machine installs it up front.
+- **Prevent:** before trusting a shell script as a documented command, probe its whole toolchain (`command -v psql jq curl bash node`) on the validation machine first. An external tool missing from the repo's own install path is an environment gap, not a task blocker, when the fix is one file — record it as a prerequisite instead of working around it.
+
+### Docs tasks need falsifiable tests too, and the cheapest proof is a mutation
+- **Symptom/risk:** "the README is correct" has no natural test, so a documentation task can silently regress (a command removed from the README, a decision table losing a row) and nothing fails.
+- **Fix:** `tests/docs/docs.test.js` (`npm run test:docs`, no database) asserts the content the backlog requires: prerequisites (Node 20+, Postgres 14+), `.env` setup, the four named scripts, the `VITE_DATA_SOURCE` flag, every route in the OL-DEC-03 live/mock table, and a recorded outcome row for each OL-DEC entry in `AUDIT_NOTES.md`.
+- **Prevent / prove it can fail:** deleting `npm run db:rules` from the README made `test:docs` exit 1 on exactly the "documents every required npm script" test; restoring the line returned 10/10. Any assertion-only deliverable gets one deliberate mutation before it is trusted (same rule as OL-032).
+
+### Near-miss: two suites that both assume "fresh reset" poison each other
+- **Symptom (avoided):** `npm run test:server` asserts seed invariants (3 AVAILABLE organs, seed-history cutoffs) while `npm run smoke` leaves a fourth AVAILABLE organ and one transplanted waitlist entry behind. Run in the wrong order, the seed-count tests fail with counts that look like a real defect.
+- **Handling:** the cycle ran `db:reset → test:server → (db:reset) → smoke`, and finished with a final `db:reset` so the next task starts on the documented seed state.
+- **Prevent:** read each suite's own header comment before picking an order, and finish a validation cycle with the reset that the suite's precondition names. The order is now written down in the README ("Order matters"), so the next person does not have to rediscover it.

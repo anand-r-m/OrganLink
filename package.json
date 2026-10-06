@@ -11,6 +11,7 @@
     "lint": "oxlint",
     "test:server": "node --test --test-concurrency=1 tests/server/*.test.js",
     "test:client": "node --test tests/client/*.test.js",
+    "test:docs": "node --test tests/docs/*.test.js",
     "preview": "vite preview",
     "db:reset": "bash scripts/db-reset.sh",
     "db:rules": "bash db/10_rule_demo.sql.test",
