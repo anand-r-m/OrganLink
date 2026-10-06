@@ -28,6 +28,10 @@ test.after(async () => {
 const get = (path, withCookie = true) =>
   fetch(`${base}${path}`, { headers: withCookie ? { cookie } : {} })
 const list = async (qs = '') => (await get(`/api/donors${qs}`)).json()
+// The seed grew a retrospective block in OL-031, so the listing counts are
+// asserted against the table rather than against a hardcoded seed size.
+const count = async (where = 'TRUE', params = []) =>
+  Number((await pool.query(`SELECT count(*)::int n FROM donor WHERE ${where}`, params)).rows[0].n)
 
 test('donors endpoints require a session', async () => {
   for (const path of ['/api/donors', '/api/donors/1']) {
@@ -39,7 +43,7 @@ test('donors endpoints require a session', async () => {
 
 test('GET /api/donors lists the seed donors in the contract shape (no organs, with organCount)', async () => {
   const rows = await list()
-  assert.equal(rows.length, 10)
+  assert.equal(rows.length, await count())
   const d = rows[0]
   assert.deepEqual(Object.keys(d).sort(), [
     'bloodGroup', 'bloodGroupId', 'dateOfBirth', 'deathCause', 'deathDate', 'donorType', 'heightCm',
@@ -53,11 +57,11 @@ test('GET /api/donors lists the seed donors in the contract shape (no organs, wi
 
 test('filters narrow server-side: type, status, hospital', async () => {
   const deceased = await list('?type=DECEASED')
-  assert.equal(deceased.length, 6)
+  assert.equal(deceased.length, await count('donor_type = $1', ['DECEASED']))
   assert.ok(deceased.every((r) => r.donorType === 'DECEASED'))
-  assert.equal((await list('?type=LIVING')).length, 4)
-  assert.equal((await list('?status=INACTIVE')).length, 0)
-  assert.equal((await list('?status=ACTIVE')).length, 10)
+  assert.equal((await list('?type=LIVING')).length, await count('donor_type = $1', ['LIVING']))
+  assert.equal((await list('?status=INACTIVE')).length, await count('status = $1', ['INACTIVE']))
+  assert.equal((await list('?status=ACTIVE')).length, await count('status = $1', ['ACTIVE']))
   const hospitalId = (await list())[0].hospitalId
   const byHospital = await list(`?hospital=${hospitalId}`)
   assert.ok(byHospital.length >= 1 && byHospital.every((r) => r.hospitalId === hospitalId))

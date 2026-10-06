@@ -9,6 +9,12 @@ test.after(() => pool.end().catch(() => {}))
 
 const one = async (sql, params) => (await pool.query(sql, params)).rows[0]
 
+// OL-031 added a retrospective block to the same seed file. The fixtures
+// asserted below describe the present-day block, which is inserted first and
+// therefore owns the lowest identity values.
+const PRESENT_DONORS = 'donor_id <= 10'
+const PRESENT_RECIPIENTS = 'recipient_id <= 20'
+
 test('8 hospitals across all four regions, with coordinates', async () => {
   const r = await one(
     `SELECT count(*)::int n, count(DISTINCT region_id)::int regions,
@@ -21,7 +27,8 @@ test('about 10 donors, mixed type, 6 HLA alleles each', async () => {
   const r = await one(
     `SELECT count(*)::int n,
             count(*) FILTER (WHERE donor_type = 'LIVING')::int living,
-            count(*) FILTER (WHERE donor_type = 'DECEASED')::int deceased FROM donor`)
+            count(*) FILTER (WHERE donor_type = 'DECEASED')::int deceased
+       FROM donor WHERE ${PRESENT_DONORS}`)
   assert.equal(r.n, 10)
   assert.ok(r.living > 0 && r.deceased > 0)
   const bad = await pool.query(
@@ -32,10 +39,12 @@ test('about 10 donors, mixed type, 6 HLA alleles each', async () => {
 
 test('about 20 recipients with 22+ waitlist entries listed 1-24 months ago', async () => {
   const r = await one(
-    `SELECT (SELECT count(*) FROM recipient)::int recipients,
-            (SELECT count(*) FROM waitlist_entry)::int entries,
-            (SELECT min(listed_date) FROM waitlist_entry) >= (CURRENT_DATE - INTERVAL '25 months') AS not_too_old,
-            (SELECT max(listed_date) FROM waitlist_entry) <= (CURRENT_DATE - INTERVAL '1 month') AS not_too_new`)
+    `SELECT (SELECT count(*) FROM recipient WHERE ${PRESENT_RECIPIENTS})::int recipients,
+            (SELECT count(*) FROM waitlist_entry WHERE ${PRESENT_RECIPIENTS})::int entries,
+            (SELECT min(listed_date) FROM waitlist_entry WHERE ${PRESENT_RECIPIENTS})
+                >= (CURRENT_DATE - INTERVAL '25 months') AS not_too_old,
+            (SELECT max(listed_date) FROM waitlist_entry WHERE ${PRESENT_RECIPIENTS})
+                <= (CURRENT_DATE - INTERVAL '1 month') AS not_too_new`)
   assert.equal(r.recipients, 20)
   assert.ok(r.entries >= 22)
   assert.ok(r.not_too_old && r.not_too_new)

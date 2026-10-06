@@ -331,3 +331,42 @@ No failures or debugging cycles.
 ### Assertion design
 - The two phases share the winning offer id, and `node:test` does not pass one test's return value to the next. They are nested subtests of one parent `test` with a closure variable, which also makes the ordering requirement explicit instead of relying on file order. **Prevent:** when test phases depend on earlier phases' output, share it via closure and assert the dependency.
 - Every assertion was checked for falsifiability: exactly 1x201, exactly 9x409 with `error.code === 'ACTIVE_OFFER_EXISTS'`, `count(*) ... IN ('CREATED','SENT','ACCEPTED') = 1`, `transport_record` count = 1, organ `ALLOCATED`. A bare "status is 201 or 409" would have passed even if the invariants were wrong.
+
+## OL-031
+
+### match_candidates() cannot be reused for historical rows
+- **Symptom:** the obvious way to give 25 back-dated organs a plausible match history is to call the existing `match_candidates(organ_id)`. It excluded every candidate and put every `run_at` in the current month.
+- **Root cause:** the function scores viability as `now() + travel_time > recovered_at + max_viability_hours`. With `recovered_at` 20 months old that is always true, so no candidate can ever qualify; it also stamps `run_at = now()` and derives `wait_score` from today's waiting time.
+- **Fix:** the seed replicates the scoring expression (same regional weights, same `weighted_mm` DRB1 double-count, same `haversine_km`, same `100 * exp(-km/500)`) but evaluates it at `mr.run_at`. **Prevent:** any function that scores against `now()` is unusable for retrospective data — replicate the expression in the seed with an explicit clock instead of calling it.
+
+### session_replication_role = replica is a trigger bypass, not a constraint bypass
+- **Decision:** retrospective rows cannot be inserted through the workflow triggers, which all assume "this is happening now", and running hundreds of retrospective inserts through them would also write audit rows describing events that never happened.
+- **Handling:** the whole historical block runs inside `BEGIN; SET LOCAL session_replication_role = replica; ... COMMIT`. CHECK, NOT NULL and unique indexes still apply — all 25 organs, 30 offers, 19 transplants and 228 match results passed them on the first load — but the audit and workflow triggers do not fire, which a test now asserts directly (`audit_log` has zero rows older than the historical cut-off).
+- **Prevent:** keep the block in one transaction so the replica setting cannot leak, and assert the audit-log consequence instead of assuming it.
+
+### History must never rest in a state the sweeps rewrite
+- **Symptom:** the first draft used `SENT` for offers that timed out and `IN_TRANSIT` for organs still moving.
+- **Root cause:** `GET /api/dashboard` and the reports endpoints call `expire_stale_offers()` on every request, which expires `SENT` offers, cancels abandoned `CREATED` ones, expires old `AVAILABLE` organs and fails their transports. Any such historical row would be silently rewritten minutes after the seed.
+- **Fix:** historical rows only ever use terminal states — organs `TRANSPLANTED/EXPIRED/DISCARDED`, offers `ACCEPTED/DECLINED/EXPIRED/VOIDED/CANCELLED`, transports `DELIVERED/FAILED`. A test now snapshots the status multiset, calls the sweep twice, and asserts it is unchanged. **Prevent:** when adding retrospective data to any system that has a reaper, enumerate the states the reaper mutates first and assert on them.
+
+### A recipient's final status retroactively excluded them from their own match run
+- **Symptom:** matching evaluated `waitlist_entry.status <> 'ACTIVE'` against the row's *current* value, so every historical taker (now `TRANSPLANTED`, `SUSPENDED` or `INACTIVE`) came out as `RECIPIENT_INACTIVE` — history with zero successful matches.
+- **Fix:** the timeline row names its `taker`; for that one candidate per run the status is read as `ACTIVE` (they were active when the run happened) and from the row itself for every other candidate. **Prevent:** when a run is scored against a table whose rows keep mutating, decide explicitly which fields are as-of-run and which are current.
+
+### Historical compatibility has to be constructed, not assumed
+- **Symptom:** 25 donors × 36 recipients with hand-picked blood groups is a lot of pairs to get right, and nothing in the schema forbids an ABO-incompatible offer — the workflow trigger is exactly what is disabled in replica mode.
+- **Fix:** donor and taker blood groups are paired by `(n % 5)` (`O-`→`A+`, `O+`→`B+`, `A+`→`A+`, `B+`→`AB+`, `AB-`→`AB-`), compatible for every row by construction, and donor/recipient weights are paired to keep the ratio inside each organ type's band. A test recomputes compatibility from `blood_compatibility` and the ratio bounds for every `ACCEPTED` offer, so a later edit cannot quietly break it. **Prevent:** replica mode removes the guard that would have caught this, so the seed must carry its own proof.
+
+### width_bucket makes the waiting-time chart a 5-month grid
+- **Symptom:** the backlog asks for at least six populated buckets, but the present-day seed only fills buckets 1–5.
+- **Root cause:** `v_waiting_time_distribution` uses `width_bucket(age_months, 0, 60, 12)` — twelve buckets of five months — so bucket 6 means 25–30 months.
+- **Fix:** six historical recipients who are still waiting were given 25–30 months on the list; the view now returns eight populated buckets. **Prevent:** read the report view's bucketing arithmetic before designing seed data against it. Twelve buckets over 60 months is not twelve monthly buckets.
+
+### Growing the seed broke every hardcoded count in the suite
+- **Symptom:** `npm run test:server` failed twice after the historical block landed — `donors-read.test.js` asserted exactly 10 donors and 6 deceased.
+- **Root cause:** those assertions pinned the size of the demo fixture, and OL-031 legitimately made the fixture bigger. OL-006's own report had flagged this as anticipated work.
+- **Fix:** the listing test now asserts the API count equals `count(*) FROM donor` (and the same per filter), which tests the real contract — the endpoint returns the table — and survives future seed growth. The OL-006 fixture-shape test keeps its hard numbers but scopes them to the present-day block, which owns the lowest identity values. **Prevent:** in a repo whose seed is expected to grow, assert endpoint-vs-table agreement and scope fixture-shape assertions explicitly instead of counting everything.
+
+### Windows environment gotchas hit this cycle
+- `psql` is not on `PATH`; PostgreSQL 18 lives in `/c/Program Files/PostgreSQL/18/bin`. `scripts/db-reset.sh` calls `psql` by name, so prepend that directory.
+- Unlike OL-030 there was no bundled Node runtime this time — no `node`, no `npm`, only `bun` 1.4.2 — so `npm run db:reset`, `test:server` and `smoke` could not start at all. A portable Node v24.21.0 win-x64 zip and `jq.exe` (required by `smoke-flow.sh`) were extracted into the pre-approved temp directory and put on `PATH`, leaving the repo untouched.
