@@ -417,3 +417,32 @@ No failures or debugging cycles.
 - **Symptom (avoided):** `npm run test:server` asserts seed invariants (3 AVAILABLE organs, seed-history cutoffs) while `npm run smoke` leaves a fourth AVAILABLE organ and one transplanted waitlist entry behind. Run in the wrong order, the seed-count tests fail with counts that look like a real defect.
 - **Handling:** the cycle ran `db:reset → test:server → (db:reset) → smoke`, and finished with a final `db:reset` so the next task starts on the documented seed state.
 - **Prevent:** read each suite's own header comment before picking an order, and finish a validation cycle with the reset that the suite's precondition names. The order is now written down in the README ("Order matters"), so the next person does not have to rediscover it.
+
+## OL-034
+
+### PostgreSQL and Node client tools were not on `PATH`
+- **Symptom:** `psql`, `pg_dump`, `node`, and `npm` all reported `command not found` in the
+  task shell, even though PostgreSQL 18.6 is installed under
+  `C:/Program Files/PostgreSQL/18/bin` and Node under
+  `%TEMP%/opencode/node-v24.21.0-win-x64`.
+- **Root cause:** neither directory is on the persistent shell `PATH`; the tool only
+  inherited the OpenCode/Windows PATH, and exports do not survive between shell calls.
+- **First attempt and why it failed:** copying `psql.exe` into `~/bin` (already on `PATH`)
+  failed with exit 127 — the copied binary cannot locate its DLLs (`libpq`, `libz`, …) away
+  from the install directory.
+- **Fix:** prepend the real install directories on the `PATH` in every command
+  (`export PATH="/c/.../node-v24.21.0-win-x64:/c/Program Files/PostgreSQL/18/bin:$PATH"`);
+  the new scripts also honour `PGBIN` so they can be pointed at a PostgreSQL bin dir.
+- **Prevent/detect:** do not `cp` Windows PostgreSQL client tools — they are not portable.
+  When a tool is "installed but not found", locate the real `bin` and use `PATH`/`PGBIN`
+  rather than copying executables.
+
+### A dump that restores is not the same as a dump that runs
+- **Context/design note:** OL-034's acceptance test is not "the file exists" but "restore it
+  into an empty DB **and run the app against it**". `verify-submission.sh` therefore restores
+  into a scratch `organlink_check`, asserts 24 tables / 8 views / 27 compatible pairs / the
+  admin hash, and then runs the full OL-019 smoke suite on a private port bound to the
+  restored DB — the dump is only trusted after the application exercises it.
+- **Prevent/detect:** when the deliverable is data, validate by consuming it the way the app
+  would, not by inspecting it. Keep the scratch restore isolated (separate DB, private
+  port) and drop it on exit.

@@ -15,6 +15,9 @@
     "preview": "vite preview",
     "db:reset": "bash scripts/db-reset.sh",
     "db:rules": "bash db/10_rule_demo.sql.test",
+    "db:dump": "bash scripts/submission-dump.sh",
+    "verify:submission": "bash scripts/verify-submission.sh",
+    "demo:rehearsal": "bash scripts/demo-rehearsal.sh",
     "smoke": "bash scripts/smoke-flow.sh",
     "concurrency": "node scripts/concurrency.mjs"
   },

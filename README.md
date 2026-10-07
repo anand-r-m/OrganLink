@@ -89,6 +89,9 @@ Restart the dev server after changing `.env`; Vite reads the flag when it starts
 | `npm run smoke` | OL-019 core-slice smoke test: login → procure → match → offers → transport → transplant, asserting HTTP status and entity state at each step. Needs `curl` + `jq`; starts the API itself if nothing is listening on `BASE_URL` (default `http://localhost:3001`) |
 | `npm run db:rules` | OL-032 business-rule demonstration: prints `BR-1 PASS` … `BR-14 PASS` (14 of 14), 0 FAIL. Runs in one transaction and rolls back, so it is safe to re-run |
 | `npm run concurrency` | OL-030 concurrency proof: 10 parallel offer creates and 2 parallel accepts → exactly one success each |
+| `npm run db:dump` | OL-034 submission dump: reset `organlink`, then `pg_dump` it to `submission/organlink.sql` (pass `-- --no-reset` to dump the current DB) |
+| `npm run verify:submission` | OL-034 restore check: load `submission/organlink.sql` into a scratch `organlink_check` DB, assert the invariants, run `smoke` against it, then drop it |
+| `npm run demo:rehearsal` | OL-034 repeatable demo: reset, then run steps 1–10 of `docs/implementation/DEMO_SCRIPT.md` through the API and scripts |
 
 Typical verification loop:
 
