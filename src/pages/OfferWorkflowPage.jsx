@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Button,
@@ -39,10 +39,13 @@ import { mockRecipients } from '../data/mockRecipients.js';
 import { USE_LIVE_API } from '../api/client.js';
 import { acceptOffer, advanceOffer, cancelOffer, declineOffer, listOffers, saveMockOffer, sendOffer } from '../api/offers.js';
 import { recordTransplant, TRANSPLANT_OUTCOMES } from '../api/transplants.js';
-import { canRecordTransplant, TRANSPLANT_DISABLED_TIP } from '../api/adapters/offers.js';
+import { acceptDetailFromLive, canRecordTransplant, TRANSPLANT_DISABLED_TIP } from '../api/adapters/offers.js';
 import { getLookups } from '../api/lookups.js';
+import { listOrgans } from '../api/organs.js';
+import { getRecipient } from '../api/recipients.js';
 import { showApiError } from '../api/notify.js';
 import { recipientId } from '../utils/displayId.js';
+import { singleFlight } from '../utils/singleFlight.js';
 
 import {
   DECLINE_REASONS,
@@ -50,10 +53,8 @@ import {
   getAllowedTransitions,
   hasActiveOfferForOrgan,
   isActiveOfferStatus,
+  canAdvanceInUi,
 } from '../utils/offerTransitions.js';
-
-
-const ADVANCE_FROM = ['DECLINED', 'EXPIRED', 'VOIDED', 'CANCELLED'];
 
 function formatDateTime(value) {
   return value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '—';
@@ -110,6 +111,22 @@ export default function OfferWorkflowPage() {
       cancelled = true;
     };
   }, []);
+
+  /* Live Record Accept modal: organ and recipient details are not on the offer row. */
+  const [liveAccept, setLiveAccept] = useState({ organ: null, recipient: null });
+  useEffect(() => {
+    setLiveAccept({ organ: null, recipient: null });
+    if (!USE_LIVE_API || !acceptTarget) return undefined;
+    let cancelled = false;
+    Promise.all([listOrgans(), getRecipient({ dbId: acceptTarget.recipientDbId })])
+      .then(([organRows, recipient]) => {
+        if (!cancelled) setLiveAccept(acceptDetailFromLive(acceptTarget, organRows, recipient));
+      })
+      .catch((err) => !cancelled && showApiError(err, 'Could not load organ and recipient details'));
+    return () => {
+      cancelled = true;
+    };
+  }, [acceptTarget]);
 
   useEffect(() => {
     if (!USE_LIVE_API) return undefined;
@@ -211,25 +228,33 @@ export default function OfferWorkflowPage() {
 
   const replaceOffer = (updated) => setOffers((prev) => prev.map((o) => (o.id === updated.id ? updated : o)));
 
-  async function handleSendOffer(offer) {
-    try {
-      replaceOffer(await sendOffer(offer));
-      notifications.show({ title: 'Offer sent', message: `${offer.id} sent to ${offer.recipientId}`, color: 'blue' });
-    } catch (error) {
-      showApiError(error, 'Send failed');
-      listOffers().then(setOffers).catch(() => {});
-    }
-  }
+  /* Send and Cancel have no modal, so a double-click would POST twice; the second request then
+     fails 409 against the already-changed offer. The guard is synchronous (see singleFlight). */
+  const rowActionGuard = useRef(null);
+  if (!rowActionGuard.current) rowActionGuard.current = singleFlight((fn) => fn());
+  const guardRowAction = (fn) => rowActionGuard.current(fn);
 
-  async function handleCancelOffer(offer) {
-    try {
-      replaceOffer(await cancelOffer(offer));
-      notifications.show({ title: 'Offer cancelled', message: `${offer.id} cancelled`, color: 'gray' });
-    } catch (error) {
-      showApiError(error, 'Cancel failed');
-      listOffers().then(setOffers).catch(() => {});
-    }
-  }
+  const handleSendOffer = (offer) =>
+    guardRowAction(async () => {
+      try {
+        replaceOffer(await sendOffer(offer));
+        notifications.show({ title: 'Offer sent', message: `${offer.id} sent to ${offer.recipientId}`, color: 'blue' });
+      } catch (error) {
+        showApiError(error, 'Send failed');
+        listOffers().then(setOffers).catch(() => {});
+      }
+    });
+
+  const handleCancelOffer = (offer) =>
+    guardRowAction(async () => {
+      try {
+        replaceOffer(await cancelOffer(offer));
+        notifications.show({ title: 'Offer cancelled', message: `${offer.id} cancelled`, color: 'gray' });
+      } catch (error) {
+        showApiError(error, 'Cancel failed');
+        listOffers().then(setOffers).catch(() => {});
+      }
+    });
 
   function handleCreateOffer() {
     const errors = {};
@@ -477,7 +502,7 @@ export default function OfferWorkflowPage() {
         onClick: () => openTransplantModal(offer),
       });
     }
-    if (ADVANCE_FROM.includes(offer.status) && (!USE_LIVE_API || offer.matchRunId)) {
+    if (canAdvanceInUi(offer, USE_LIVE_API)) {
       actions.push({
         label: 'Advance to Next',
         variant: 'subtle',
@@ -625,14 +650,18 @@ export default function OfferWorkflowPage() {
 
   /* --- Accept modal lookups ---------------------------------------------- */
 
-  const acceptOrgan = acceptTarget
+  /* Mock mode looks the offer's organ/recipient up in the mock lists. Live ids never match the mock
+     ids, so live mode loads the real rows when the modal opens (see liveAccept below). */
+  const mockAcceptOrgan = !USE_LIVE_API && acceptTarget
     ? organs.find((o) => o.id === acceptTarget.organId) ?? null
     : null;
-  const acceptRecipient = acceptTarget
+  const mockAcceptRecipient = !USE_LIVE_API && acceptTarget
     ? recipients.find((r) => r.id === acceptTarget.recipientId) ?? null
     : null;
-  const acceptDonor = acceptTarget
-    ? mockDonors.find((d) => d.id === (acceptTarget.donorId ?? acceptOrgan?.donorId)) ?? null
+  const acceptOrgan = USE_LIVE_API ? liveAccept.organ : mockAcceptOrgan;
+  const acceptRecipient = USE_LIVE_API ? liveAccept.recipient : mockAcceptRecipient;
+  const acceptDonor = !USE_LIVE_API && acceptTarget
+    ? mockDonors.find((d) => d.id === (acceptTarget.donorId ?? mockAcceptOrgan?.donorId)) ?? null
     : null;
 
   /* --- Summary chips ------------------------------------------------------ */

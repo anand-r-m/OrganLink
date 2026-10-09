@@ -595,6 +595,10 @@ export default function DonorRegistryPage() {
         onSubmit={handleProcure}
         loading={procSaving}
         size="md"
+        // Opened from the Donor Profile drawer. Modal and Drawer share Mantine's default z-index (200)
+        // and this modal is earlier in the tree, so the drawer's overlay covered it. 250 stays below
+        // the 300 that Select/DateTimePicker dropdowns use.
+        zIndex={250}
       >
         <Stack gap={16}>
           <Select

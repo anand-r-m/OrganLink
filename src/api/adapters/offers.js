@@ -67,3 +67,21 @@ export function adaptMockOffer(m) {
     transplant: null,
   };
 }
+
+// Record Accept modal details in live mode. The offer row carries only organType and
+// recipientName, so the blood groups, hospitals and urgency come from the organ list
+// (GET /api/organs) and the recipient detail (GET /api/recipients/:id). A field the source rows
+// do not carry stays null and the modal shows "—". Nothing is looked up in mock data.
+export function acceptDetailFromLive(offer, organRows, recipient) {
+  const organ = organRows?.find((o) => o.dbId === offer.organDbId) ?? null;
+  const entry = recipient?.waitlist?.find((w) => w.organType === offer.organType) ?? null;
+  return {
+    organ: organ && { bloodGroup: organ.bloodGroup ?? null, hospital: organ.hospital ?? null },
+    recipient: recipient && {
+      name: recipient.name ?? offer.recipientName ?? null,
+      bloodGroup: recipient.bloodGroup ?? null,
+      hospital: recipient.hospital ?? null,
+      urgency: entry?.urgency ?? null,
+    },
+  };
+}

@@ -53,6 +53,8 @@ import {
   recipientToForm,
   hlaOptionsFromLookups,
   hlaOptionsFromMock,
+  recipientLookupOptions,
+  optionLabels,
   validateRecipientForm,
   formToRecipientBody,
   formToMockRecipient,
@@ -275,9 +277,9 @@ export default function RecipientWaitlistPage() {
 
   // Reference lists (live: from /api/lookups and /api/hospitals; mock: hardcoded).
   const [hospitalOptions, setHospitalOptions] = useState([]);
-  const [organOptions, setOrganOptions] = useState(ORGAN_TYPES);
-  const [bloodOptions, setBloodOptions] = useState(BLOOD_GROUPS);
-  const [urgencyOptions, setUrgencyOptions] = useState(URGENCY_LEVELS);
+  const [organOptions, setOrganOptions] = useState(USE_LIVE_API ? [] : ORGAN_TYPES);
+  const [bloodOptions, setBloodOptions] = useState(USE_LIVE_API ? [] : BLOOD_GROUPS);
+  const [urgencyOptions, setUrgencyOptions] = useState(USE_LIVE_API ? [] : URGENCY_LEVELS);
   const [hlaOptions, setHlaOptions] = useState(MOCK_HLA_OPTIONS);
 
   // Form state
@@ -340,9 +342,10 @@ export default function RecipientWaitlistPage() {
     getLookups()
       .then((lk) => {
         if (cancelled || !lk) return;
-        setOrganOptions(lk.organTypes.map((t) => ({ value: String(t.id), label: t.name })));
-        setBloodOptions(lk.bloodGroups.map((g) => ({ value: String(g.id), label: g.name })));
-        setUrgencyOptions(lk.urgencies.map((u) => ({ value: String(u.id), label: u.code })));
+        const opts = recipientLookupOptions(lk);
+        setOrganOptions(opts.organs);
+        setBloodOptions(opts.bloods);
+        setUrgencyOptions(opts.urgencies);
         setHlaOptions(hlaOptionsFromLookups(lk.hlaAlleles));
       })
       .catch((err) => !cancelled && showApiError(err, 'Could not load reference lists'));
@@ -352,8 +355,8 @@ export default function RecipientWaitlistPage() {
   }, []);
 
   // The filter selects: blood group filters by name in both modes (the API takes the name).
-  const bloodFilterOptions = USE_LIVE_API ? bloodOptions.map((o) => o.label) : BLOOD_GROUPS;
-  const urgencyFilterOptions = USE_LIVE_API ? urgencyOptions.map((o) => o.label) : URGENCY_LEVELS;
+  const bloodFilterOptions = USE_LIVE_API ? optionLabels(bloodOptions) : BLOOD_GROUPS;
+  const urgencyFilterOptions = USE_LIVE_API ? optionLabels(urgencyOptions) : URGENCY_LEVELS;
 
   const refreshList = async () => {
     if (liveEntriesView) setEntries(await listWaitlist(filters));

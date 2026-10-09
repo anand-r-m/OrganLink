@@ -446,3 +446,37 @@ No failures or debugging cycles.
 - **Prevent/detect:** when the deliverable is data, validate by consuming it the way the app
   would, not by inspecting it. Keep the scratch restore isolated (separate DB, private
   port) and drop it on exit.
+
+## OL-029 browser QA (in progress, through S3.21)
+
+### Mock-shaped initial state crashed a live-only code path
+- **Context:** `RecipientWaitlistPage` kept `bloodOptions`/`urgencyOptions` as plain strings (mock shape) until
+  `/api/lookups` replaced them with `{value,label}` objects. Live mode derived filter labels with `.map((o) => o.label)`,
+  so on first render Mantine `Select` received `[undefined, ...]` and threw `Cannot use 'in' operator ... 'value' in undefined`.
+  It reproduced on every load, so a reload could not help. Unit tests never rendered the live branch.
+- **Fix:** live mode starts with empty lists; lookups go through `recipientLookupOptions` (throws on a malformed response);
+  filter labels go through `optionLabels`. An error boundary would only have hidden the cause.
+- **Prevent/detect:** initial state must have the same shape as the loaded state. Tests should feed live-shaped data to the real
+  Mantine component (`renderToString`), including the pre-load state.
+
+### Same z-index, tree order decides
+- Mantine Modal and Drawer both default to z-index 200. A modal opened from a drawer but declared earlier in the tree renders under the
+  drawer's overlay. Set an explicit `zIndex` (250, below Select/DateTimePicker dropdowns at 300) on any modal opened from a drawer.
+
+### Looking live ids up in mock lists
+- The Record Accept modal looked offers' `O-0001`/`RCP-…` display ids up in `mockOrgans`/`mockRecipients`. Live ids never match, so
+  every field was "—" (and a colliding id would have shown another record's data). The "accepted limitation" was really a missed
+  live wiring. Live mode now loads `GET /api/organs` and `GET /api/recipients/:id` (existing contracts) when the modal opens.
+
+### Browser noise is not an app defect
+- `Extension context invalidated` (`content.js`) comes from a browser extension content script; no `content.js` or that string exists
+  in `src/`, `public/` or the build. React DevTools banner is informational. Confirm in a clean/incognito profile before blaming the app.
+
+### A later valid backend failure does not explain an earlier invalid UI state (OL-029, OL-035)
+- **Context:** after Cancel Offer, the CANCELLED row still offered "Advance to Next" while its organ was AVAILABLE. Separately and later, the organ was discarded and Advance returned 422 `RULE_VIOLATION` ("Organ 3 is not available"). The 422 is correct enforcement, but I treated it, and then the contract's A4, as closing the UI question. The UI was exposing an action your acceptance step (4.8, "no actions remain") says should not exist.
+- **Root cause:** the page's `ADVANCE_FROM` copied the server's list, which came from an adopted assumption (A4), not from the context specs (which tie Advance to Decline). Eligibility in the UI is a product decision; mirroring the server list was a silent one.
+- **Fix:** OL-035: `UI_ADVANCE_FROM` omits CANCELLED; the server and contract are unchanged.
+- **Prevent/detect:** (1) keep each observed event as its own finding; a later error never retroactively explains an earlier state. (2) Check the provenance of a rule (spec vs adopted assumption) before calling behaviour "correct". (3) Do not pin an unresolved behaviour in tests. (4) A UI may expose fewer actions than the API allows, but record that choice. (5) Read the Response body and the Network Initiator stack before theorising about a wrong request.
+
+### Advance can be rejected for the organ, not the offer (OL-029)
+- Advance on an offer can return 422 because the organ is no longer AVAILABLE (`trg_offer_viability` raises P0001; the route stops the walk). Found by read-only queries (offer, run results, organ audit trail). The offer row carries no organ status, so the UI cannot pre-empt it; the server message is shown in a toast.

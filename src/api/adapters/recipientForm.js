@@ -154,3 +154,21 @@ export function formToMockRecipient(f, { id, region = '' } = {}) {
     weight: Number(f.weight),
   };
 }
+
+// Live reference lists from GET /api/lookups -> Select options. Throws on a malformed response
+// instead of handing Mantine undefined entries (which crash its Select).
+export function recipientLookupOptions(lk) {
+  const list = (key) => {
+    if (!Array.isArray(lk?.[key])) throw new Error(`Lookups response is missing "${key}"`);
+    return lk[key];
+  };
+  return {
+    organs: list('organTypes').map((t) => ({ value: String(t.id), label: t.name })),
+    bloods: list('bloodGroups').map((g) => ({ value: String(g.id), label: g.name })),
+    urgencies: list('urgencies').map((u) => ({ value: String(u.id), label: u.code })),
+  };
+}
+
+// Filter selects take plain labels (the API filters blood group / urgency by name).
+export const optionLabels = (options) =>
+  options.map((o) => (typeof o === 'string' ? o : o.label)).filter((l) => typeof l === 'string');

@@ -844,3 +844,20 @@ These tasks are independent once Phases 1 and 2 are done. OL-DEC-03 tags each on
   - `submission/organlink.sql`, `docs/implementation/DEMO_SCRIPT.md` (optional)
 - Demo steps:
   - Run the full rehearsal end to end.
+
+### OL-035 — Offer Workflow: cancelled offers show no actions (UI only)
+
+- Phase: 4
+- Owner: TBA
+- Dependencies: OL-016, OL-029
+- Scope: Found in OL-029 browser QA (S4 step 4.8). After Cancel Offer succeeds, the CANCELLED row still showed an enabled "Advance to Next". Decision approved by the user: cancellation is terminal in the Offer Workflow UI. Hide "Advance to Next" for CANCELLED offers in live and mock mode. It stays for DECLINED, EXPIRED and VOIDED (live: only with a match run).
+  - UI only. The server's `ADVANCE_FROM`, API_CONTRACT A4, schema and seed are unchanged, so the endpoint still accepts CANCELLED; the UI just does not offer it.
+- Acceptance criteria:
+  - A CANCELLED row has no action controls.
+  - DECLINED, EXPIRED and VOIDED rows still show Advance to Next (live: when `matchRunId` is set).
+- Required tests:
+  - UI checks: client tests on the eligibility rule; OL-029 S4 step 4.8 in the browser.
+- Files likely affected:
+  - `src/utils/offerTransitions.js`, `src/pages/OfferWorkflowPage.jsx`, `tests/client/ol029-cancel-advance.test.js`
+- Demo steps:
+  - Cancel a Created offer and show that its row has no actions.

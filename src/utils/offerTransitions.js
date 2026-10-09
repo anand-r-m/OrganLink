@@ -23,6 +23,13 @@ export const OFFER_TRANSITIONS = {
   CANCELLED: [],
 };
 
+/* Statuses from which the Offer Workflow UI offers "Advance to Next" (OL-035). The server also accepts
+   CANCELLED (API_CONTRACT A4, unchanged); the UI treats a manual cancellation as terminal and does not
+   offer it. Live mode additionally needs a match run. */
+export const UI_ADVANCE_FROM = ['DECLINED', 'EXPIRED', 'VOIDED'];
+
+export const canAdvanceInUi = (offer, live) => UI_ADVANCE_FROM.includes(offer.status) && (!live || Boolean(offer.matchRunId));
+
 /* Six documented decline reasons (Section 5.6). */
 export const DECLINE_REASONS = [
   'Medical contraindication',
