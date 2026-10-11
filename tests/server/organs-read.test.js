@@ -61,7 +61,7 @@ test('GET /api/organs lists every organ in the OrganSummary shape, newest recove
     'activeOfferId', 'discardReasonCode', 'discardReasonId', 'donorBloodGroup', 'donorId', 'donorName',
     'expiresAt', 'hasActiveOffer', 'hoursRemaining', 'id', 'isExpired', 'maxViabilityHours', 'organType',
     'organTypeId', 'recoveredAt', 'recoveringHospitalId', 'recoveringHospitalName', 'regionCode',
-    'status',
+    'status', 'transportStatus',
   ])
   const times = rows.map((r) => Date.parse(r.recoveredAt))
   assert.deepEqual(times, [...times].sort((a, b) => b - a))

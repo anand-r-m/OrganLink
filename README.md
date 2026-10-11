@@ -106,6 +106,24 @@ so reset shortly before demoing or running the organ/matching checks.
 
 ---
 
+## Upgrading an existing database
+
+The schema is defined by SQL files and there is no migration framework (05_tdd.md §2.3).
+
+- **Fresh install:** `npm run db:reset` loads `db/01_schema.sql`, which already contains every
+  change below. Nothing else to run.
+- **Existing database you want to keep:** run each upgrade file once, against the database you
+  choose, with `psql -v ON_ERROR_STOP=1 -X -d <database> -f db/upgrades/<file>.sql`. Upgrade files
+  never change or delete rows, check the existing data before adding a constraint, and are safe
+  to re-run. Apply them in the order listed.
+
+| File | Task | Effect |
+|---|---|---|
+| `db/upgrades/OL-036_OL-037.sql` | OL-036, OL-037 | `match_candidates()` gives tied candidates distinct, deterministic ranks; `fn_audit()` records the real id for `organ_offer` and `transplant_event` |
+| `db/upgrades/OL-039.sql` | OL-039 | Adds `UNIQUE (run_id, organ_id)` on `match_run` and replaces the single-column offer→run FK with `FOREIGN KEY (run_id, organ_id) REFERENCES match_run (run_id, organ_id) ON DELETE RESTRICT`. Refuses to run if any offer references another organ's run. After it, a match run that an offer references can no longer be deleted |
+
+---
+
 ## Mock mode vs live mode (`VITE_DATA_SOURCE`)
 
 | Mode | How | Needs DB? | Behaviour |
@@ -156,6 +174,24 @@ OL-DEC-01/02/03). The ones you will notice:
   demo.
 - Seed data ages out: `test:server` is green for roughly the first hours after
   `db:reset`, then seed-age tests fail. `npm run db:reset` restores them.
+- **Donor/organ validation is deliberately light (OL-038).** Nothing restricts which organ
+  types a LIVING donor may provide (a Heart can be procured from a living donor), procurement
+  does not check donor status, and the number of organs per donor is not limited. Nothing checks
+  that `organ.recovered_at` is on or after a deceased donor's `death_date`, or that `death_date`
+  is not in the future. These are domain decisions the project has not taken, not enforced
+  rules; the demo data should not be read as clinically validated.
+- **BR-1 as implemented.** A DECEASED donor requires `death_date`; `death_cause` is optional.
+  A LIVING donor requires both `death_date` and `death_cause` to be NULL
+  (`ck_donor_death_fields`).
+- **The 24-month history in `db/03_seed_demo.sql` is simulated (OL-031, regenerated in OL-040).**
+  It follows the matching and offer rules: candidates are eligible only until their own
+  allocation, ranks are 1..N, offers go down the ranking one at a time, and timestamps follow
+  the workflow order. It loads with triggers and foreign-key checks disabled (replica mode), so
+  `db/history_checks.sql` re-checks every rule afterwards and aborts the load on any violation.
+  It is demonstration data, not clinical data.
+- **Audit rows written before OL-037 keep `row_id = 'composite'`** for `organ_offer` and
+  `transplant_event`. The full row (including `offer_id` / `transplant_id`) is in
+  `old_values` / `new_values`. Rows written afterwards carry the real id.
 
 ---
 
@@ -163,6 +199,8 @@ OL-DEC-01/02/03). The ones you will notice:
 
 ```
 db/                  schema + reference/demo seeds, business-rule demo (10_rule_demo.sql)
+db/upgrades/         in-place upgrade scripts for existing databases
+db/history_checks.sql semantic checks run after the historical seed loads (OL-040)
 docs/context/        authoritative specs (schema, TDD, PRD, user flow, design brief, …)
 docs/implementation/ BACKLOG.md, API_CONTRACT.md, AUDIT_NOTES.md, per-task reports,
                      LESSONS_LEARNED.md, MANUAL_QA_CHECKLIST.md

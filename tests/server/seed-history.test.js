@@ -3,6 +3,7 @@
 // Read-only by design: the only write is expire_stale_offers(), which the
 // dashboard endpoint calls anyway, and the point of one test is that it
 // cannot rewrite seeded history.
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { app } from '../../server/index.js'
@@ -141,20 +142,55 @@ test('accepted historical offers were genuinely ABO/Rh and size compatible', asy
   assert.equal(r.incompatible, 0)
 })
 
-test('every historical match run ranked at least one qualified candidate', async () => {
-  const r = await one(
-    `SELECT count(*)::int runs_without_a_qualified_candidate
+// OL-040: a run may legitimately have no qualified candidate (e.g. an organ that expired with
+// nobody eligible). What must hold is that offers only come from runs with qualified candidates,
+// and that an organ whose run qualified nobody ends EXPIRED or NO_SUITABLE_RECIPIENT, unoffered.
+test('runs without a qualified candidate have no offers and an unplaced outcome', async () => {
+  const bad = await q(
+    `SELECT o.organ_id, o.status, dr.code,
+            (SELECT count(*) FROM organ_offer f WHERE f.organ_id = o.organ_id)::int offers
        FROM match_run mr JOIN organ o ON o.organ_id = mr.organ_id
+       LEFT JOIN discard_reason dr ON dr.discard_reason_id = o.discard_reason_id
       WHERE o.${HIST}
-        AND NOT EXISTS (SELECT 1 FROM match_result m
-                         WHERE m.run_id = mr.run_id AND m.qualified)`)
-  assert.equal(r.runs_without_a_qualified_candidate, 0)
+        AND NOT EXISTS (SELECT 1 FROM match_result m WHERE m.run_id = mr.run_id AND m.qualified)
+        AND ((SELECT count(*) FROM organ_offer f WHERE f.organ_id = o.organ_id) > 0
+             OR NOT (o.status = 'EXPIRED' OR dr.code = 'NO_SUITABLE_RECIPIENT'))`)
+  assert.deepEqual(bad, [])
 
   const excluded = await one(
     `SELECT count(*)::int excluded_rows
        FROM match_result m JOIN match_run mr USING (run_id) JOIN organ o ON o.organ_id = mr.organ_id
       WHERE o.${HIST} AND NOT m.qualified AND m.exclusion_reason_id IS NOT NULL`)
   assert.ok(excluded.excluded_rows > 0, 'matching history includes excluded candidates')
+})
+
+// OL-040: the semantic rules of the regenerated history, from the same file the seed runs after
+// loading (db/history_checks.sql). Each named check must report zero violations.
+test('every OL-040 history check reports zero violations', async () => {
+  const sql = readFileSync(new URL('../../db/history_checks.sql', import.meta.url), 'utf8')
+  const client = await pool.connect()
+  try {
+    await client.query(sql)
+    const { rows } = await client.query('SELECT check_name, violations::int FROM ol040_history_checks ORDER BY check_name')
+    assert.ok(rows.length >= 27, `checks defined ${rows.length}`)
+    const failing = rows.filter((r) => r.violations !== 0)
+    assert.deepEqual(failing, [], failing.map((r) => `${r.check_name}: ${r.violations}`).join('; '))
+  } finally {
+    client.release()
+  }
+})
+
+// OL-040: coverage the reports rely on, without any invalid offer (checks 1a-1f guarantee that).
+test('history covers every decline reason and every terminal offer status', async () => {
+  const rows = await q(
+    `SELECT f.status, dr.code, count(*)::int n
+       FROM organ_offer f JOIN organ o USING (organ_id)
+       LEFT JOIN decline_reason dr USING (decline_reason_id)
+      WHERE o.${HIST} GROUP BY 1, 2`)
+  const statuses = new Set(rows.map((r) => r.status))
+  for (const s of ['ACCEPTED', 'DECLINED', 'EXPIRED', 'VOIDED', 'CANCELLED']) assert.ok(statuses.has(s), `missing ${s}`)
+  const codes = new Set(rows.filter((r) => r.code).map((r) => r.code))
+  assert.equal(codes.size, 6, `decline codes ${[...codes].join(',')}`)
 })
 
 test('historical rows are facts, not audited events', async () => {

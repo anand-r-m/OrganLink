@@ -480,3 +480,67 @@ No failures or debugging cycles.
 
 ### Advance can be rejected for the organ, not the offer (OL-029)
 - Advance on an offer can return 422 because the organ is no longer AVAILABLE (`trg_offer_viability` raises P0001; the route stops the walk). Found by read-only queries (offer, run results, organ audit trail). The offer row carries no organ status, so the UI cannot pre-empt it; the server message is shown in a toast.
+
+## OL-036 / OL-037 (report-preparation review)
+
+### RANK() is not a unique key generator
+`RANK()` gives tied rows the same value, so a unique index on rank turns a tie into a failed
+run. When a ranking feeds a unique index, use `ROW_NUMBER()` and end the ORDER BY with a unique
+key. The ties are realistic: identical inputs, or two long waits that both saturate `wait_score`.
+
+### A trigger helper that guesses a column name fails quietly
+`fn_audit()` guessed `<table>_id`; two tables had differently named keys and the fallback
+`'composite'` hid the miss. Pass the key explicitly and test every audited table, not just one.
+
+### Test the upgrade path, not just the fresh install
+For schema files with no migration framework, build a database from the *previous* committed
+schema (`git show HEAD:db/01_schema.sql`), apply the upgrade, and diff a schema-only `pg_dump`
+against a fresh install. Compare an audit-log checksum to prove history is untouched.
+
+### A disposable cluster needs a valid locale on macOS
+`pg_ctl start` failed with "postmaster became multithreaded during startup". Setting
+`LC_ALL=en_US.UTF-8` fixed it.
+
+### Tests/09_verification_fixed.sql still fails in section 11 (pre-existing, not fixed)
+The script pre-ages an offer on an already expired organ, which `trg_offer_viability` rightly
+refuses. It fails identically on the pre-OL-036 schema. Sections 1-10 pass. Left as is.
+
+## OL-039
+
+### Replica mode also disables foreign keys
+The historical seed runs with `session_replication_role = replica`. FK checks are triggers, so
+they are skipped too: a successful reset proves nothing about a new FK. Validate the loaded rows
+with an explicit query.
+
+### A composite FK needs an exact unique target and a delete rule that keeps NOT NULL columns
+The parent needs `UNIQUE (run_id, organ_id)` even though `run_id` is already the key. Plain
+`ON DELETE SET NULL` would also null `organ_id` (NOT NULL); a column list needs PostgreSQL 15.
+RESTRICT avoids both and matches BR-6.
+
+### An upgrade should refuse bad data, not repair it
+`OL-039.sql` counts mismatched rows first and aborts. Tested with a planted mismatch: the
+transaction rolled back with no constraint added and the data unchanged.
+
+## OL-040
+
+### Synthetic history must be generated from the rules it claims to illustrate
+The OL-031 history hard-coded decliners by name and checked only ACCEPTED offers, so six offers
+were blood-group-incompatible and most chains contradicted the ranking. Deriving every offer from
+the stored ranking, and checking every offer (not only accepted ones), removed the whole class.
+
+### A rule that holds "for the taker's own run" must say so in the join
+The old seed joined takers by name only, so every taker counted as active in every run, including
+runs after their own transplant. Eligibility needs the time dimension: active up to the own run,
+excluded after an allocation.
+
+### Validate after the bypass, with the same checks the tests use
+Replica mode skips triggers and FK checks. One SQL file (`db/history_checks.sql`) now runs at the
+end of the seed (aborting the load) and in the test suite, so the seed and the tests cannot drift.
+It caught a real generator error on the first load: an EXPIRED step in the month-0 chain pushed
+three timestamps into the future.
+
+### Compare before/after by business keys, not ids
+Organ and offer ids depended on query execution order. Exports keyed by timeline month, names and
+offsets from recovery made before/after and reset-to-reset comparisons meaningful; `ORDER BY n` on
+the historical inserts now makes the ids reproducible as well.
+

@@ -3,7 +3,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { deliverTransport, departTransport, listTransports, resetMockTransports } from '../../src/api/transport.js'
-import { adaptMockTransport, adaptTransport, hospitalMarkers, nextTransportAction } from '../../src/api/adapters/transport.js'
+import { adaptMockTransport, adaptTransport, hospitalMarkers, nextTransportAction, viabilityElapsed } from '../../src/api/adapters/transport.js'
 import { mockTransports } from '../../src/data/mockTransports.js'
 
 const realFetch = globalThis.fetch
@@ -47,6 +47,12 @@ test('actions are offered by status only: PENDING depart, IN_TRANSIT deliver, no
   assert.equal(nextTransportAction('IN_TRANSIT'), 'deliver')
   assert.equal(nextTransportAction('DELIVERED'), null)
   assert.equal(nextTransportAction('FAILED'), null)
+})
+
+test('viabilityElapsed flags a transport whose organ has no viability left', () => {
+  assert.equal(viabilityElapsed(adaptTransport(apiTransport)), false)
+  assert.equal(viabilityElapsed(adaptTransport({ ...apiTransport, organHoursRemaining: 0 })), true)
+  assert.equal(viabilityElapsed(adaptMockTransport(mockTransports.find((m) => m.status === 'Preparing'))), false)
 })
 
 test('hospitalMarkers yields one marker per hospital with origin/destination counts', () => {

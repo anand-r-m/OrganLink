@@ -12,7 +12,8 @@ const notFound = (id) => new ApiError(404, 'TRANSPORT_NOT_FOUND', `Transport ${i
 // GET /api/transport?status= (API_CONTRACT endpoint #33). Sweeps first; active transports lead.
 router.get('/', async (req, res, next) => {
   try {
-    const where = ['TRUE']
+    // Discarded organs are out of the logistics view; their transport rows are kept, just not listed.
+    const where = [`v.status <> 'DISCARDED'`]
     const params = []
     if (req.query.status !== undefined) {
       const list = String(req.query.status).split(',')
@@ -33,7 +34,7 @@ router.get('/', async (req, res, next) => {
 
 // Conditional transition (A2): UPDATE ... WHERE status = required. 0 rows -> 404 or 409.
 // The organ is locked first, as the offer transitions do, so the two flows serialise.
-function transition(action, required, setSql) {
+function transition(action, required, setSql, guard = null) {
   router.post(`/:id/${action}`, async (req, res, next) => {
     try {
       const id = parseId(req.params.id)
@@ -43,7 +44,9 @@ function transition(action, required, setSql) {
         async (client) => {
           const cur = await client.query('SELECT organ_id FROM transport_record WHERE transport_id = $1', [id])
           if (cur.rowCount === 0) throw notFound(id)
-          await client.query('SELECT 1 FROM organ WHERE organ_id = $1 FOR UPDATE', [cur.rows[0].organ_id])
+          const organId = cur.rows[0].organ_id
+          await client.query('SELECT 1 FROM organ WHERE organ_id = $1 FOR UPDATE', [organId])
+          if (guard) await guard(client, id, organId)
           const upd = await client.query(
             `UPDATE transport_record SET ${setSql} WHERE transport_id = $1 AND status = $2 RETURNING transport_id`,
             [id, required],
@@ -69,8 +72,26 @@ function transition(action, required, setSql) {
   })
 }
 
+// OL-042: a PENDING transport whose organ's viability has elapsed cannot be dispatched. Any other
+// status falls through to the usual "requires PENDING" 409.
+async function viableToDepart(client, id, organId) {
+  const { rows } = await client.query(
+    `SELECT t.status, v.is_expired FROM transport_record t JOIN v_organ v ON v.organ_id = t.organ_id
+     WHERE t.transport_id = $1`,
+    [id],
+  )
+  if (rows[0].status === 'PENDING' && rows[0].is_expired) {
+    throw new ApiError(
+      409,
+      'INVALID_STATE_TRANSITION',
+      `Organ ${organId} viability window has elapsed; it cannot be dispatched`,
+      { currentStatus: 'PENDING', organId },
+    )
+  }
+}
+
 // POST /api/transport/:id/depart (endpoint #34): PENDING -> IN_TRANSIT.
-transition('depart', 'PENDING', `status = 'IN_TRANSIT', departed_at = now()`)
+transition('depart', 'PENDING', `status = 'IN_TRANSIT', departed_at = now()`, viableToDepart)
 // POST /api/transport/:id/deliver (endpoint #35): IN_TRANSIT -> DELIVERED. No expiry check (OL-DEC-02, A).
 transition('deliver', 'IN_TRANSIT', `status = 'DELIVERED', arrived_at = now()`)
 

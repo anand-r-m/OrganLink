@@ -235,7 +235,10 @@ CREATE TABLE match_run (
     urgency_weight  NUMERIC(5,2) NOT NULL CHECK (urgency_weight  >= 0),
     distance_weight NUMERIC(5,2) NOT NULL CHECK (distance_weight >= 0),
     wait_weight     NUMERIC(5,2) NOT NULL CHECK (wait_weight     >= 0),
-    run_by          BIGINT REFERENCES app_user(user_id) ON DELETE SET NULL
+    run_by          BIGINT REFERENCES app_user(user_id) ON DELETE SET NULL,
+    -- Redundant with the primary key; it exists only as the target of
+    -- organ_offer's composite provenance FK (OL-039).
+    CONSTRAINT ux_match_run_run_organ UNIQUE (run_id, organ_id)
 );
 
 CREATE TABLE match_result (
@@ -271,7 +274,7 @@ CREATE TABLE organ_offer (
     offer_id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     organ_id          BIGINT NOT NULL REFERENCES organ(organ_id)         ON DELETE RESTRICT,
     recipient_id      BIGINT NOT NULL REFERENCES recipient(recipient_id) ON DELETE RESTRICT,
-    run_id            BIGINT REFERENCES match_run(run_id) ON DELETE SET NULL,
+    run_id            BIGINT,
     status            TEXT NOT NULL DEFAULT 'CREATED'
                       CHECK (status IN ('CREATED','SENT','ACCEPTED','DECLINED',
                                         'EXPIRED','VOIDED','CANCELLED')),
@@ -293,7 +296,13 @@ CREATE TABLE organ_offer (
         (status = 'VOIDED' AND void_reason IS NOT NULL)
      OR (status <> 'VOIDED' AND void_reason IS NULL)),
     CONSTRAINT ck_offer_time_order CHECK (
-        sent_at IS NULL OR sent_at >= created_at)
+        sent_at IS NULL OR sent_at >= created_at),
+    -- An offer made from a match run must be for that run's organ (OL-039).
+    -- MATCH SIMPLE (the default): an offer without a run (run_id NULL) is not
+    -- checked. RESTRICT: a run that an offer references cannot be deleted
+    -- (match runs are permanent, BR-6).
+    CONSTRAINT fk_offer_run_same_organ FOREIGN KEY (run_id, organ_id)
+        REFERENCES match_run (run_id, organ_id) ON DELETE RESTRICT
 );
 
 CREATE TABLE transport_record (
@@ -483,8 +492,11 @@ BEGIN
     INSERT INTO audit_log(table_name, row_id, action, old_values, new_values, user_id)
     VALUES (
         TG_TABLE_NAME,
+        -- Key column: optional trigger argument (organ_offer -> offer_id,
+        -- transplant_event -> transplant_id), else <table>_id. waitlist_entry has
+        -- a composite key, so it falls back to 'composite'.
         COALESCE(
-            (to_jsonb(COALESCE(NEW, OLD)) ->> (TG_TABLE_NAME || '_id')),
+            (to_jsonb(COALESCE(NEW, OLD)) ->> COALESCE(TG_ARGV[0], TG_TABLE_NAME || '_id')),
             'composite'),
         TG_OP,
         CASE WHEN TG_OP IN ('UPDATE','DELETE') THEN to_jsonb(OLD) END,
@@ -502,9 +514,9 @@ CREATE TRIGGER trg_audit_recipient   AFTER INSERT OR UPDATE OR DELETE ON recipie
 CREATE TRIGGER trg_audit_organ       AFTER INSERT OR UPDATE OR DELETE ON organ
     FOR EACH ROW EXECUTE FUNCTION fn_audit();
 CREATE TRIGGER trg_audit_offer       AFTER INSERT OR UPDATE OR DELETE ON organ_offer
-    FOR EACH ROW EXECUTE FUNCTION fn_audit();
+    FOR EACH ROW EXECUTE FUNCTION fn_audit('offer_id');
 CREATE TRIGGER trg_audit_transplant  AFTER INSERT OR UPDATE OR DELETE ON transplant_event
-    FOR EACH ROW EXECUTE FUNCTION fn_audit();
+    FOR EACH ROW EXECUTE FUNCTION fn_audit('transplant_id');
 CREATE TRIGGER trg_audit_waitlist    AFTER INSERT OR UPDATE OR DELETE ON waitlist_entry
     FOR EACH ROW EXECUTE FUNCTION fn_audit();
 
@@ -868,6 +880,7 @@ BEGIN
 
     WITH candidate AS (
         SELECT ws.recipient_id,
+               ws.listed_date,
                ws.urgency_score,
                ws.wait_score,
                r.blood_group_id,
@@ -932,9 +945,14 @@ BEGIN
                              wait_score, distance_km, qualified, exclusion_reason_id)
     SELECT v_run_id,
            s.recipient_id,
+           -- ROW_NUMBER, not RANK: ties must still get distinct ranks or ux_match_rank
+           -- rejects the whole run. The trailing keys make the order reproducible
+           -- (earlier listing first, then lowest recipient_id); recipient_id is a
+           -- reproducibility tie-break only, not a clinical fairness claim.
            CASE WHEN s.exclusion_code IS NULL
-                THEN RANK() OVER (PARTITION BY (s.exclusion_code IS NULL)
-                                  ORDER BY s.match_score DESC, s.wait_score DESC)
+                THEN ROW_NUMBER() OVER (PARTITION BY (s.exclusion_code IS NULL)
+                                        ORDER BY s.match_score DESC, s.wait_score DESC,
+                                                 s.listed_date ASC, s.recipient_id ASC)
            END,
            CASE WHEN s.exclusion_code IS NULL THEN s.match_score END,
            s.hla_score, s.urgency_score, s.distance_score, s.wait_score,

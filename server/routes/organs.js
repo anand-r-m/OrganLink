@@ -67,6 +67,9 @@ router.get('/:id', async (req, res, next) => {
 // POST /api/organs/:id/discard {discardReasonId}: AVAILABLE or EXPIRED -> DISCARDED. Sweeps first.
 // The schema leaves an open offer dangling if its organ is discarded and no DB rule covers it, so the
 // open-offer check is an API decision (A17); the status transition itself is also guarded by the trigger.
+// OL-042: an ALLOCATED organ whose viability elapsed before departure (transport PENDING) can also be
+// discarded; its transport is failed in the same transaction, as sweep step 6 does for EXPIRED organs.
+// An organ already IN_TRANSIT is left alone and can still be delivered (OL-DEC-02).
 router.post('/:id/discard', async (req, res, next) => {
   try {
     const id = /^\d{1,15}$/.test(req.params.id) ? Number(req.params.id) : null
@@ -82,12 +85,22 @@ router.post('/:id/discard', async (req, res, next) => {
         const cur = await client.query('SELECT status FROM organ WHERE organ_id = $1 FOR UPDATE', [id])
         if (cur.rowCount === 0) throw notFound
         const { status } = cur.rows[0]
-        if (status !== 'AVAILABLE' && status !== 'EXPIRED') {
+        let expiredBeforeDeparture = false
+        if (status === 'ALLOCATED') {
+          const t = await client.query(
+            `SELECT v.is_expired, t.status AS transport_status
+             FROM v_organ v LEFT JOIN transport_record t ON t.organ_id = v.organ_id
+             WHERE v.organ_id = $1`,
+            [id],
+          )
+          expiredBeforeDeparture = t.rows[0].is_expired && t.rows[0].transport_status === 'PENDING'
+        }
+        if (status !== 'AVAILABLE' && status !== 'EXPIRED' && !expiredBeforeDeparture) {
           throw new ApiError(
             409,
             'INVALID_STATE_TRANSITION',
-            `Organ ${id} is ${status}; only an AVAILABLE or EXPIRED organ can be discarded`,
-            { currentStatus: status, requiredStatus: 'AVAILABLE or EXPIRED' },
+            `Organ ${id} is ${status}; only an AVAILABLE or EXPIRED organ, or an ALLOCATED organ whose viability elapsed before departure, can be discarded`,
+            { currentStatus: status, requiredStatus: 'AVAILABLE or EXPIRED, or ALLOCATED with elapsed viability and a PENDING transport' },
           )
         }
         const open = await client.query(
@@ -104,9 +117,15 @@ router.post('/:id/discard', async (req, res, next) => {
         }
         await client.query(
           `UPDATE organ SET status = 'DISCARDED', discard_reason_id = $2
-           WHERE organ_id = $1 AND status IN ('AVAILABLE','EXPIRED')`,
-          [id, reasonId],
+           WHERE organ_id = $1 AND status = $3`,
+          [id, reasonId, status],
         )
+        if (expiredBeforeDeparture) {
+          await client.query(
+            `UPDATE transport_record SET status = 'FAILED' WHERE organ_id = $1 AND status = 'PENDING'`,
+            [id],
+          )
+        }
         return loadOrganWithWeights(client, id)
       },
       { sweep: true },

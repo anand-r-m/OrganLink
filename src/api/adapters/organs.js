@@ -19,6 +19,7 @@ export function adaptOrganRow(o) {
     status: o.status,
     hasActiveOffer: o.hasActiveOffer,
     activeOfferId: o.activeOfferId,
+    transportStatus: o.transportStatus ?? null,
   };
 }
 
@@ -45,22 +46,44 @@ export function adaptMockOrgan(m) {
     status,
     hasActiveOffer: false,
     activeOfferId: null,
+    transportStatus: null,
   };
 }
 
-// Discard is offered only while an organ is AVAILABLE or EXPIRED; ALLOCATED, TRANSPLANTED and
-// DISCARDED are terminal for this action (API_CONTRACT organs/:id/discard).
-export const canDiscard = (organ) => organ?.status === 'AVAILABLE' || organ?.status === 'EXPIRED';
+// An ALLOCATED organ whose viability window has elapsed (the sweep never expires it, OL-DEC-02).
+const expiredAllocation = (organ) => organ?.status === 'ALLOCATED' && organ.isExpired === true;
+
+// Discard is accepted for an AVAILABLE or EXPIRED organ, and for an expired ALLOCATED organ whose
+// transport has not departed (OL-042). TRANSPLANTED and DISCARDED are terminal for this action
+// (API_CONTRACT organs/:id/discard).
+export const canDiscard = (organ) =>
+  organ?.status === 'AVAILABLE' ||
+  organ?.status === 'EXPIRED' ||
+  (expiredAllocation(organ) && organ.transportStatus === 'PENDING');
 
 export const DISCARD_BLOCKED_TOOLTIP = 'Cancel the active offer before discarding';
+export const DISCARD_IN_TRANSIT_TOOLTIP = 'Already in transit; it can still be delivered, so it cannot be discarded';
+
+// The Discard button is shown when the server would accept it, and shown disabled for an expired
+// organ that is already in transit.
+export const showsDiscard = (organ) =>
+  canDiscard(organ) || (expiredAllocation(organ) && organ.transportStatus === 'IN_TRANSIT');
+
+// Why a shown Discard button is disabled (its tooltip), or null when it is enabled.
+export function discardBlockedTooltip(organ) {
+  if (!canDiscard(organ)) return DISCARD_IN_TRANSIT_TOOLTIP;
+  if (organ.hasActiveOffer) return DISCARD_BLOCKED_TOOLTIP;
+  return null;
+}
 
 // Lookup discard reasons -> Select options ("CODE - description").
 export const discardReasonOptions = (reasons = []) =>
   reasons.map((r) => ({ value: String(r.id), label: `${r.code} - ${r.description}` }));
 
-// An EXPIRED organ defaults to VIABILITY_ELAPSED (06: the candidate chain ran out); otherwise no default.
+// An EXPIRED organ, or an expired ALLOCATED one (OL-042), defaults to VIABILITY_ELAPSED (06: the
+// candidate chain ran out); otherwise no default.
 export function defaultDiscardReasonId(organ, reasons = []) {
-  if (organ?.status !== 'EXPIRED') return null;
+  if (organ?.status !== 'EXPIRED' && !expiredAllocation(organ)) return null;
   const hit = reasons.find((r) => r.code === 'VIABILITY_ELAPSED');
   return hit ? String(hit.id) : null;
 }

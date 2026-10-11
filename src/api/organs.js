@@ -34,7 +34,7 @@ export async function discardOrgan(organ, discardReasonId, live = USE_LIVE_API) 
   if (!live) {
     // Same order as the server: status first, then the open offer.
     if (!canDiscard(organ)) {
-      throw new ApiError(409, 'INVALID_STATE_TRANSITION', `Organ is ${organ.status}; only an AVAILABLE or EXPIRED organ can be discarded`);
+      throw new ApiError(409, 'INVALID_STATE_TRANSITION', `Organ is ${organ.status}; only an AVAILABLE or EXPIRED organ, or an ALLOCATED organ whose viability elapsed before departure, can be discarded`);
     }
     if (hasActiveMockOffer(organ.id)) {
       throw new ApiError(409, 'ACTIVE_OFFER_EXISTS', 'This organ already has an active offer');

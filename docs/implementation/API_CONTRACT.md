@@ -109,7 +109,7 @@ This document is the single source of truth for every endpoint the frontend call
 | A6 | The audit PDF stays client-side; `audit.pdf` is deferred | reports |
 | A11 | Display IDs are frontend-only | all |
 | A12 | NUMERIC and INT8 are sent as JSON numbers; timestamps are UTC ISO | all |
-| A17 | Discard requires no open offer and status AVAILABLE or EXPIRED | `POST /api/organs/:id/discard` |
+| A17 | Discard requires no open offer and status AVAILABLE or EXPIRED (OL-042: or ALLOCATED with elapsed viability and a PENDING transport) | `POST /api/organs/:id/discard` |
 
 ---
 
@@ -194,8 +194,11 @@ Note: `recipient.status` is never changed by a trigger. A recipient who receives
   "status": "AVAILABLE",
   "discardReasonId": null, "discardReasonCode": null,
   "hasActiveOffer": false, "activeOfferId": null,
+  "transportStatus": null,
   "defaultWeights": { "hla": 20, "urgency": 40, "distance": 25, "wait": 15 } }
 ```
+
+`transportStatus` (OL-042) is the status of the organ's transport record (`PENDING`, `IN_TRANSIT`, `DELIVERED`, `FAILED`), or `null` when it has none. The Organs page uses it only to decide whether to offer Discard.
 
 **MatchRun**
 ```json
@@ -486,10 +489,11 @@ The countdown comes from the organ's viability window. There is no separate tran
 - Purpose: Discard an unplaceable organ with a reason (BR-3).
 - Request body: `{ "discardReasonId": 2 }`.
 - Success response (200): `Organ`, with `status: "DISCARDED"`.
+- Allowed from `AVAILABLE` or `EXPIRED`. OL-042: also from `ALLOCATED` when the organ's viability window has elapsed and its transport is still `PENDING`. In that case the same transaction sets the transport `PENDING → FAILED` (the row is kept; the accepted offer is unchanged). The UI pre-selects `VIABILITY_ELAPSED`. An organ whose transport is `IN_TRANSIT` cannot be discarded and can still be delivered (OL-DEC-02).
 - Error responses:
   - 404 `ORGAN_NOT_FOUND`.
   - 409 `ACTIVE_OFFER_EXISTS`: a CREATED or SENT offer is open; cancel it first (A17).
-  - 409 `INVALID_STATE_TRANSITION`: status is not `AVAILABLE` or `EXPIRED` (A17).
+  - 409 `INVALID_STATE_TRANSITION`: any other status, including `ALLOCATED` while viable or once the transport has left `PENDING` (A17, OL-042). Message: "Organ N is S; only an AVAILABLE or EXPIRED organ, or an ALLOCATED organ whose viability elapsed before departure, can be discarded".
   - 422 `RULE_VIOLATION`: backstop from `trg_organ_status_transitions`.
   - 400 `REFERENCE_NOT_FOUND`.
 - Notes: The organ row is locked `FOR UPDATE`. Sweep: yes.
@@ -639,14 +643,17 @@ The countdown comes from the organ's viability window. There is no separate tran
 #### GET /api/transport
 - Purpose: Transport page and map (FR-11).
 - Query: `status` (optional; comma-separated list allowed).
-- Success response (200): `Transport[]`, active ones (`PENDING`, `IN_TRANSIT`) first.
+- Success response (200): `Transport[]`, active ones (`PENDING`, `IN_TRANSIT`) first. Transports whose organ is `DISCARDED` are left out (OL-041); the rows stay in the database.
 - Sweep: yes.
 
 #### POST /api/transport/:id/depart
 - Purpose: Mark In Transit.
 - Request body: none.
 - Success response (200): `Transport` with `status: "IN_TRANSIT"` and `departedAt`.
-- Error responses: 404 `TRANSPORT_NOT_FOUND`; 409 `INVALID_STATE_TRANSITION` (requires `PENDING`).
+- Error responses:
+  - 404 `TRANSPORT_NOT_FOUND`.
+  - 409 `INVALID_STATE_TRANSITION` (requires `PENDING`).
+  - 409 `INVALID_STATE_TRANSITION` when the transport is `PENDING` but the organ's viability window has elapsed (OL-042): "Organ N viability window has elapsed; it cannot be dispatched"; `details: { currentStatus: "PENDING", organId }`.
 
 #### POST /api/transport/:id/deliver
 - Purpose: Mark Delivered. This unlocks Record Transplant.

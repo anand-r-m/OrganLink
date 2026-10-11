@@ -72,3 +72,7 @@ export function hospitalMarkers(rows) {
 
 // Which action a row offers: PENDING -> depart, IN_TRANSIT -> deliver, otherwise none.
 export const nextTransportAction = (status) => (status === 'PENDING' ? 'depart' : status === 'IN_TRANSIT' ? 'deliver' : null);
+
+// A PENDING transport whose organ's viability window has elapsed should not be dispatched. UI-only:
+// expiring an allocated organ in the database is deferred (OL-DEC-02).
+export const viabilityElapsed = (row) => row.viabilityHours != null && row.elapsedHours >= row.viabilityHours;

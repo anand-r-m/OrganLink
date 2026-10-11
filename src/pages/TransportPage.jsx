@@ -11,7 +11,7 @@ import TransportMap from '../components/TransportMap.jsx';
 import ViabilityCountdown from '../components/ViabilityCountdown.jsx';
 import FormModal from '../components/FormModal.jsx';
 import { deliverTransport, departTransport, listTransports } from '../api/transport.js';
-import { nextTransportAction } from '../api/adapters/transport.js';
+import { nextTransportAction, viabilityElapsed } from '../api/adapters/transport.js';
 import { showApiError } from '../api/notify.js';
 
 const formatTime = (iso) => (iso ? dayjs(iso).format('YYYY-MM-DD HH:mm') : '—');
@@ -152,6 +152,13 @@ export default function TransportPage() {
         Cell: ({ row }) => {
           const action = nextTransportAction(row.original.status);
           if (!action) return <span>—</span>;
+          if (action === 'depart' && viabilityElapsed(row.original)) {
+            return (
+              <Text size="xs" c="red">
+                Viability elapsed — cannot dispatch
+              </Text>
+            );
+          }
           return (
             <Button size="xs" onClick={() => setPending({ row: row.original, action })}>
               {ACTIONS[action].label}

@@ -9,10 +9,10 @@ import FormModal from '../components/FormModal.jsx';
 import { discardOrgan, listOrgans } from '../api/organs.js';
 import { getLookups } from '../api/lookups.js';
 import {
-  DISCARD_BLOCKED_TOOLTIP,
-  canDiscard,
   defaultDiscardReasonId,
+  discardBlockedTooltip,
   discardReasonOptions,
+  showsDiscard,
 } from '../api/adapters/organs.js';
 import { showApiError } from '../api/notify.js';
 
@@ -142,10 +142,11 @@ export default function OrgansPage() {
         enableSorting: false,
         Cell: ({ row }) => {
           const o = row.original;
-          if (!canDiscard(o)) return null;
-          const blocked = o.hasActiveOffer;
+          if (!showsDiscard(o)) return null;
+          const blockedReason = discardBlockedTooltip(o);
+          const blocked = blockedReason !== null;
           return (
-            <Tooltip label={DISCARD_BLOCKED_TOOLTIP} disabled={!blocked}>
+            <Tooltip label={blockedReason ?? ''} disabled={!blocked}>
               <span>
                 <Button size="compact-sm" variant="light" color="red" disabled={blocked} onClick={() => openDiscard(o)}>
                   Discard

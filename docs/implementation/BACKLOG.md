@@ -861,3 +861,157 @@ These tasks are independent once Phases 1 and 2 are done. OL-DEC-03 tags each on
   - `src/utils/offerTransitions.js`, `src/pages/OfferWorkflowPage.jsx`, `tests/client/ol029-cancel-advance.test.js`
 - Demo steps:
   - Cancel a Created offer and show that its row has no actions.
+
+### OL-036 — Matching: deterministic unique ranks for tied candidates
+
+- Status: **COMPLETE** (disposable cluster; see `OL-036-REPORT.md`). Not applied to the live QA DB.
+- Phase: 4
+- Owner: TBA
+- Dependencies: OL-014
+- Scope: Found in the report-preparation review. `match_candidates()` ranks qualified candidates with `RANK() OVER (ORDER BY match_score DESC, wait_score DESC)`. Two qualified candidates that tie on both keys receive the same rank, and the insert into `match_result` fails on `ux_match_rank UNIQUE (run_id, rank) WHERE qualified`. The whole run is rolled back and the API returns 409 `DUPLICATE`. Approved decision (user): replace with `ROW_NUMBER()` ordered by `match_score DESC, wait_score DESC, listed_date ASC, recipient_id ASC`. The final `recipient_id` key exists for reproducibility only and is not a clinical fairness claim.
+  - Change `db/01_schema.sql` only. `docs/context/01_schema.sql` stays as the original spec.
+  - Add `db/upgrades/OL-036_OL-037.sql` as the existing-install upgrade path (the repo otherwise upgrades by `db:reset`).
+  - No weakening of `ux_match_rank` or any constraint. The historical seed is not changed.
+- Acceptance criteria:
+  - Before the fix, two fully tied qualified candidates make `match_candidates()` fail with 23505 on `ux_match_rank` (reproduced on an isolated database).
+  - After the fix, tied candidates receive distinct, consecutive ranks; a candidate with an earlier `listed_date` ranks first on a full score tie; with equal `listed_date` the lower `recipient_id` ranks first; a repeat run gives the same order.
+  - Existing matching, offers and advance tests still pass.
+- Required tests:
+  - DB tests: tie fixtures in `tests/server/match-rank-ties.test.js`.
+  - API tests: `POST /api/matching/runs` with tied fixtures returns 201.
+  - UI checks: n/a
+- Files likely affected:
+  - `db/01_schema.sql`, `db/upgrades/OL-036_OL-037.sql`, `tests/server/match-rank-ties.test.js`
+- Demo steps:
+  - n/a
+
+### OL-037 — Audit log: correct `row_id` for organ_offer and transplant_event
+
+- Status: **COMPLETE** (disposable cluster; see `OL-037-REPORT.md`). Not applied to the live QA DB.
+- Phase: 4
+- Owner: TBA
+- Dependencies: OL-001
+- Scope: Found in the report-preparation review. `fn_audit()` derives the row id from `<table_name>_id`. That column does not exist on `organ_offer` (`offer_id`) or `transplant_event` (`transplant_id`), so their audit rows store `row_id = 'composite'`. The full row is still in `old_values`/`new_values`, so nothing is lost, but `row_id` and `ix_audit_table_row` are useless for those two tables. Approved decision (user): pass the key column name to `fn_audit()` as a trigger argument for those two tables; keep `'composite'` for `waitlist_entry` (its key really is composite).
+  - Change `db/01_schema.sql` only. Existing audit rows are not backfilled or modified.
+  - Same upgrade file as OL-036.
+- Acceptance criteria:
+  - New offer and transplant audit rows have `row_id` equal to `offer_id` / `transplant_id` as text.
+  - `donor`, `recipient` and `organ` keep their existing row ids; `waitlist_entry` keeps `'composite'`.
+  - Existing audit rows are untouched by the upgrade.
+- Required tests:
+  - DB tests: `tests/server/audit-row-id.test.js` (rolled-back transaction covering all six audited tables).
+  - API tests: existing audit assertions still pass.
+  - UI checks: n/a
+- Files likely affected:
+  - `db/01_schema.sql`, `db/upgrades/OL-036_OL-037.sql`, `tests/server/audit-row-id.test.js`
+- Demo steps:
+  - n/a
+
+### OL-038 — Document donor-organ and chronology validation limitations (docs only)
+
+- Status: **COMPLETE** (README known limitations).
+- Phase: 4
+- Owner: TBA
+- Dependencies: none
+- Scope: Document, without changing code or schema, two accepted domain-validation limitations found in the report-preparation review: (a) nothing restricts which organ types a LIVING donor may provide (a Heart can be procured from a living donor), and procurement does not check donor status or limit organs per donor; (b) nothing checks that `organ.recovered_at` is on or after a deceased donor's `death_date`, or that `death_date` is not in the future. Also record the implemented BR-1 rule precisely: DECEASED requires `death_date`, `death_cause` is optional; LIVING requires both to be NULL.
+- Acceptance criteria:
+  - README "Known limitations" lists both limitations and the BR-1 wording.
+  - `npm run test:docs` passes.
+- Required tests:
+  - n/a (documentation)
+- Files likely affected:
+  - `README.md`
+- Demo steps:
+  - n/a
+
+### OL-039 — Offers: enforce that an offer's match run belongs to the same organ (composite FK)
+
+- Status: **COMPLETE** (disposable cluster; see `OL-039-REPORT.md`). Not applied to the live QA DB.
+- Phase: 4
+- Owner: TBA
+- Dependencies: OL-015, OL-016
+- Scope: Found in the normalization review. Every offer created from a match run must be for that run's organ (`match_run.run_id → organ_id`). The API enforces this on create (400 "Match run N belongs to a different organ") and Advance copies both values from the source offer, but the database only had `FOREIGN KEY (run_id) REFERENCES match_run(run_id)`, so a direct SQL write could store a mismatch. Approved decision (user):
+  - add `UNIQUE (run_id, organ_id)` on `match_run` (the FK target);
+  - replace the single-column `organ_offer.run_id` FK with `FOREIGN KEY (run_id, organ_id) REFERENCES match_run (run_id, organ_id) ON DELETE RESTRICT`;
+  - keep `run_id` nullable; default MATCH SIMPLE leaves run-less offers valid;
+  - change `db/01_schema.sql` only (`docs/context/` untouched); existing installs use `db/upgrades/OL-039.sql`;
+  - behaviour change: deleting a match run that an offer references is now refused (it used to set the offer's `run_id` to NULL). No API path deletes runs (BR-6).
+- Acceptance criteria:
+  - An offer with its own run's `(run_id, organ_id)` is accepted; a mismatched pair is rejected by PostgreSQL (23503 on `fk_offer_run_same_organ`); a NULL-run offer is accepted.
+  - Deleting a referenced run is refused; deleting an unreferenced run still works (and cascades its results).
+  - The seed (present-day and historical) and all existing workflows still work.
+  - The upgrade is idempotent, refuses to run if mismatched rows exist, and leaves an upgraded database schema-identical to a fresh install.
+- Required tests:
+  - DB tests: `tests/server/offer-run-organ.test.js`; post-reset provenance query (the historical block loads with triggers disabled, so FK checks do not run during that load).
+  - API tests: full `test:server`, `smoke`, `concurrency`; existing mismatched-run API test still returns 400.
+  - UI checks: n/a
+- Files likely affected:
+  - `db/01_schema.sql`, `db/upgrades/OL-039.sql`, `tests/server/offer-run-organ.test.js`, `README.md`
+- Demo steps:
+  - n/a
+
+### OL-040 — Historical seed: regenerate match results and offer chains coherently
+
+- Status: **COMPLETE** (disposable cluster; see `OL-040-REPORT.md`). Not applied to the live QA DB.
+- Phase: 4
+- Owner: TBA
+- Dependencies: OL-031, OL-036, OL-039
+- Scope: Found in the report-preparation review. The OL-031 history contains offers to blood-group-incompatible recipients and to recipients absent from their own run, takers counted active in runs after their own transplant, rank gaps, takers not at the top of the ranking, transports departing before acceptance, overlapping open offers, early expiry/void timestamps, and a NO_SUITABLE_RECIPIENT discard with qualified candidates. Approved decision (user): Option C — regenerate only the historical `match_result` and `organ_offer` layers (plus dependent timestamps and discard reasons) inside the OL-031 block.
+  - Keep unchanged: the 25-row timeline, donors, recipients, waitlists, organs and final organ statuses, accepted takers, transplant outcomes, transport destinations, and all present-day OL-006 data.
+  - Regenerate deterministically: candidate qualification at run time, ranks in the OL-036 order, sequential offer chains derived from the corrected ranks, all offer/transport/transplant timestamps, terminal-status and decline-reason coverage, and discard reasons consistent with the chain. Use `ORDER BY n` where ids or sequence order would otherwise depend on query execution order.
+  - Present-day recipients may appear in historical decline chains; their profiles, waitlist entries and present-day matching behaviour must not change.
+  - Any controlled historical-loading mechanism (the block runs with `session_replication_role = replica`) must be explained and followed by post-load validation of every semantic rule.
+- Acceptance criteria:
+  - Validation 1–10 of the approved plan (eligibility, rank/order integrity, chronology, coverage, discard consistency, provenance, present-day non-regression, report before/after manifest, determinism across two resets, full test totals).
+- Required tests:
+  - DB tests: extended `tests/server/seed-history.test.js`.
+  - API tests: full `test:server`, `db:rules`, `smoke`, `concurrency`.
+  - UI checks: n/a
+- Files likely affected:
+  - `db/03_seed_demo.sql`, `tests/server/seed-history.test.js`
+- Demo steps:
+  - n/a
+
+### OL-041 — Transport page: hide discarded organs; no dispatch after viability elapses
+
+- Status: **COMPLETE (uncommitted)**. Found in final-demo QA, outside the original plan, so this entry was recorded after the change.
+- Phase: 4
+- Owner: TBA
+- Dependencies: OL-017, OL-023
+- Scope: The Transport page listed transport rows for DISCARDED organs and offered "Mark In Transit" on a PENDING transport whose ALLOCATED organ had no viability left (OL-DEC-02 gap).
+  - `GET /api/transport` leaves out rows whose organ is DISCARDED. The rows stay in the database; the response shape is unchanged. Documented in `API_CONTRACT.md` under OL-042.
+  - The Transport page shows "Viability elapsed — cannot dispatch" instead of the depart button when the organ's viability has elapsed. UI only; the depart endpoint is unchanged.
+- Acceptance criteria:
+  - No transport row for a DISCARDED organ is listed.
+  - An expired PENDING row has no depart button; a viable PENDING row still has one.
+- Required tests:
+  - UI checks: `tests/client/transport.test.js` (`viabilityElapsed`); browser check of the Transport page.
+- Files likely affected:
+  - `server/routes/transport.js`, `src/api/adapters/transport.js`, `src/pages/TransportPage.jsx`, `tests/client/transport.test.js`
+- Demo steps:
+  - n/a
+
+### OL-042 — Organs: discard an ALLOCATED organ whose viability elapsed before departure
+
+- Status: **COMPLETE (uncommitted)**; API-contract changes approved by the user 2026-10-11. Tested on a disposable cluster; not applied to or run against the live QA DB. See `OL-042-REPORT.md`.
+- Phase: 4
+- Owner: TBA
+- Dependencies: OL-023, OL-041, OL-DEC-02
+- Scope: An ALLOCATED organ whose viability window has elapsed while its transport is still PENDING stays ALLOCATED with no available action (the OL-DEC-02 sweep gap). It is a missing API rule and UI action, not a schema change: `trg_organ_status_transitions` already allows ALLOCATED → DISCARDED, `transport_record` already has FAILED, and the `VIABILITY_ELAPSED` discard reason exists.
+  - `POST /api/organs/:id/discard` also accepts ALLOCATED when the organ is expired (`v_organ.is_expired`) and its transport is PENDING. In the same transaction it sets that transport PENDING → FAILED, which mirrors sweep step 6. No row is deleted; the ACCEPTED offer, timestamps and history are untouched.
+  - ALLOCATED and IN_TRANSIT stays undiscardable and still deliverable (the accepted OL-DEC-02 limitation).
+  - `POST /api/transport/:id/depart` refuses an organ whose viability has elapsed (409 `INVALID_STATE_TRANSITION`).
+  - The Organ shape gains a nullable `transportStatus` so the Organs page can show Discard (default reason VIABILITY_ELAPSED) only when the server will accept it, and a disabled button with a tooltip otherwise.
+  - No schema, sweep, trigger, seed or historical-data change.
+- Acceptance criteria:
+  - An expired ALLOCATED organ with a PENDING transport is discarded with VIABILITY_ELAPSED; its transport becomes FAILED; its offer stays ACCEPTED.
+  - The same request for a non-expired ALLOCATED organ, or for one whose transport is IN_TRANSIT or DELIVERED, returns 409 `INVALID_STATE_TRANSITION`, and nothing changes.
+  - Depart on an expired organ returns 409; depart on a viable organ still succeeds.
+  - AVAILABLE/EXPIRED discard, offer expiry and transplant flows are unchanged.
+- Required tests:
+  - API/DB tests: `tests/server/organs-discard-allocated.test.js`; skipped unless `OL_DISPOSABLE_DB=1` and `DATABASE_URL` is not `organlink`.
+  - UI checks: `tests/client/organs-discard.test.js` (eligibility, tooltip, default reason, `transportStatus`); browser check on the Organs and Transport pages.
+- Files likely affected:
+  - `server/routes/organs.js`, `server/util/organSql.js`, `server/routes/transport.js`, `src/api/adapters/organs.js`, `src/api/organs.js`, `src/pages/OrgansPage.jsx`, `docs/implementation/API_CONTRACT.md`, `tests/server/organs-discard-allocated.test.js`, `tests/server/organs-read.test.js`, `tests/client/organs-discard.test.js`
+- Demo steps:
+  - Discard the expired allocated organ on the Organs page; its transport no longer appears as dispatchable.
